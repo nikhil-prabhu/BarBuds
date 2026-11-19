@@ -1,2 +1,4 @@
 .idea/
-core/target/
+target/
+xcuserdata/
+*.xcuserstate
