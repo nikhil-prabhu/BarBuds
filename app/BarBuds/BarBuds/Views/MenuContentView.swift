@@ -1,0 +1,197 @@
+import BarBudsCore
+import SwiftUI
+
+/// The popover shown from the menu bar icon.
+struct MenuContentView: View {
+    let devices: DeviceManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            MenuHeader(devices: devices)
+
+            if let session = devices.selected {
+                DeviceControls(session: session)
+                    .id(session.id)
+            } else {
+                noDevices
+            }
+        }
+        .padding(16)
+        .frame(width: 300)
+    }
+
+    private var noDevices: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "earbuds")
+                .font(.system(size: 36))
+                .foregroundStyle(.secondary)
+            Text("No Earbuds Connected")
+                .font(.headline)
+            Text("Connect supported earbuds in Bluetooth settings and they’ll appear here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+}
+
+/// Battery, noise control and EQ for one device.
+private struct DeviceControls: View {
+    let session: EarbudsSession
+
+    var body: some View {
+        switch session.connection {
+        case .connected:
+            connected
+        case .connecting:
+            ProgressView("Connecting…")
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+        case .disconnected:
+            VStack(spacing: 8) {
+                Text(session.lastError ?? "Not connected.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button("Reconnect") {
+                    Task { await session.connect() }
+                }
+                .buttonStyle(.glassProminent)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var connected: some View {
+        let capabilities = session.capabilities
+
+        BatteryView(battery: session.state.battery, hasChargingCase: capabilities.hasChargingCase)
+
+        if !capabilities.ancModes.isEmpty {
+            Divider()
+            AncControl(
+                modes: capabilities.ancModes,
+                selected: session.state.anc,
+                onSelect: session.setAnc
+            )
+        }
+
+        if let eqCapabilities = capabilities.eq, let eq = session.eq {
+            Divider()
+            EqControl(
+                capabilities: eqCapabilities,
+                settings: eq,
+                onSelectPreset: session.selectEqPreset,
+                onSetGain: session.setGain
+            )
+        }
+
+        if let error = session.lastError {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct MenuHeader: View {
+    let devices: DeviceManager
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                title
+                if let session = devices.selected {
+                    Text(status(of: session))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Menu {
+                #if DEBUG
+                Section("Debug") {
+                    Button("Simulate Device Connecting", action: devices.simulateConnect)
+                    Button("Simulate Device Disconnecting", action: devices.simulateDisconnect)
+                        .disabled(devices.selected == nil)
+                }
+                #endif
+                Button("About BarBuds") {
+                    NSApp.activate()
+                    openWindow(id: "about")
+                }
+                Divider()
+                Button("Quit BarBuds") {
+                    NSApplication.shared.terminate(nil)
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+    }
+
+    /// The device name, or a switcher when more than one device is connected.
+    @ViewBuilder
+    private var title: some View {
+        let name = devices.selected?.name ?? "BarBuds"
+        if devices.sessions.count > 1 {
+            Menu {
+                ForEach(devices.sessions) { session in
+                    Toggle(session.name, isOn: Binding(
+                        get: { session.id == devices.selected?.id },
+                        set: { if $0 { devices.selectedID = session.id } }
+                    ))
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(name)
+                        .font(.headline)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        } else {
+            Text(name)
+                .font(.headline)
+        }
+    }
+
+    private func status(of session: EarbudsSession) -> String {
+        let model = session.capabilities.displayName
+        let detail = switch session.connection {
+        case .connected: "Connected"
+        case .connecting: "Connecting…"
+        case .disconnected: "Disconnected"
+        }
+        // Only repeat the model when the user has renamed the device.
+        return session.name == model ? detail : "\(model) · \(detail)"
+    }
+}
+
+#Preview("One device") {
+    MenuContentView(devices: DeviceManager(previewSessions: [.preview()]))
+}
+
+#Preview("Two devices") {
+    MenuContentView(devices: DeviceManager(previewSessions: [
+        .preview(name: "Mock Buds", id: "a"),
+        .preview(name: "Office Buds", id: "b"),
+    ]))
+}
+
+#Preview("No devices") {
+    MenuContentView(devices: DeviceManager(previewSessions: []))
+}

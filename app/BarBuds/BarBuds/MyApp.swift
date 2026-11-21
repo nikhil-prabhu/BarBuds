@@ -1,9 +1,20 @@
 import SwiftUI
 
 @main struct BarBudsApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
+
+    /// Xcode runs the whole app to render previews. Without this check, every
+    /// preview session adds a second, inert BarBuds icon to the menu bar.
+    private static let isRunningForPreviews =
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+
+    @State private var devices = DeviceManager(
+        discovery: isRunningForPreviews ? MockDiscovery(names: []) : MockDiscovery()
+    )
+
     var body: some Scene {
-        MenuBarExtra("BarBuds", systemImage: "earbuds") {
-            PlaceHolderView()
+        MenuBarExtra("BarBuds", systemImage: "earbuds", isInserted: .constant(!Self.isRunningForPreviews)) {
+            MenuContentView(devices: devices)
         }
         .menuBarExtraStyle(.window)
         
@@ -16,46 +27,11 @@ import SwiftUI
     }
 }
 
-struct PlaceHolderView: View {
-    @Environment(\.openWindow) private var openWindow
-    
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Spacer()
-                Menu {
-                    Button("About BarBuds") {
-                        openAboutWindow()
-                    }
-                    Divider()
-                    Button("Quit BarBuds") {
-                        NSApplication.shared.terminate(nil)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(.secondary)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-            }
-            
-            HStack(spacing: 8) {
-                Image(systemName: "earbuds")
-                    .font(.title2)
-                Text("Hello world!")
-                    .font(.headline)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
-        .padding(16)
-        .frame(width: 240)
-    }
-    
-    private func openAboutWindow() {
-        NSApp.activate()
-        openWindow(id: "about")
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// A menu bar utility has no main window. Without this, AppKit quits the app
+    /// whenever the menu bar panel or the About window is the last window to close.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 }
 

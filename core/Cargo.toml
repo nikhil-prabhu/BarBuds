@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["staticlib", "cdylib"]
+crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
 # Must match the `uniffi_bindgen` version pinned by the installed cargo-swift

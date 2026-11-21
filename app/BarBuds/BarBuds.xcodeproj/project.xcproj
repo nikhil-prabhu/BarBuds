@@ -10,6 +10,12 @@
       "Base",
     ],
   },
+  "packages": [
+    {
+      "kind": "local",
+      "path": "../../BarBudsCore",
+    },
+  ],
   "files": [
     { "kind": "folder", "path": "BarBuds", "target-membership": [ "BarBuds" ] },
     {
@@ -30,6 +36,12 @@
         "compile-sources",
         "frameworks",
         "resources",
+      ],
+      "package-product-members": [
+        {
+          "product-name": "BarBudsCore",
+          "build-phase": { "build-phase": "frameworks" },
+        },
       ],
       "build-settings": {
         "CODE_SIGN_IDENTITY[sdk=macosx*]": "Apple Development",
