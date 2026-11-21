@@ -2,3 +2,5 @@
 target/
 xcuserdata/
 *.xcuserstate
+BarBudsCore/
+core/generated/
