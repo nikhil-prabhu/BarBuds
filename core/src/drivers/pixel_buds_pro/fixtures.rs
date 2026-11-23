@@ -60,6 +60,8 @@ fn captured_handshake() {
     assert_eq!(controller.take_outbound(), hex(TX_READ_EQ));
 
     controller.feed(hex(RX_EQ)).unwrap();
+    // Then the Volume EQ setting (not captured: it was added later).
+    assert!(!controller.take_outbound().is_empty());
     controller.feed(hex(RX_PROBE_NOT_FOUND)).unwrap();
     assert!(controller.take_outbound().is_empty());
 

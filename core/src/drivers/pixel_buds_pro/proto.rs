@@ -11,7 +11,10 @@ pub(crate) use crate::drivers::google::{BatteryInfo, DeviceBatteryInfo, battery_
 
 /// `AllegroSettingType`: which setting `ReadSetting` should return.
 pub(crate) mod setting_id {
+    /// On-head detection.
+    pub const OHD_ENABLE: i32 = 2;
     pub const CURRENT_ANCR_STATE: i32 = 13;
+    pub const VOLUME_EQ_ENABLE: i32 = 15;
     pub const CURRENT_USER_EQ: i32 = 16;
 }
 
@@ -49,12 +52,17 @@ pub(crate) struct SettingsRsp {
 /// decode as `value: None`.
 #[derive(Clone, PartialEq, Message)]
 pub(crate) struct SettingValue {
-    #[prost(oneof = "Setting", tags = "13, 16")]
+    #[prost(oneof = "Setting", tags = "2, 13, 15, 16")]
     pub value: Option<Setting>,
 }
 
 #[derive(Clone, PartialEq, Oneof)]
 pub(crate) enum Setting {
+    /// On-head (in-ear) detection.
+    #[prost(bool, tag = "2")]
+    OhdEnable(bool),
+    #[prost(bool, tag = "15")]
+    VolumeEqEnable(bool),
     /// An [`anc_state`] value.
     #[prost(int32, tag = "13")]
     CurrentAncrState(i32),

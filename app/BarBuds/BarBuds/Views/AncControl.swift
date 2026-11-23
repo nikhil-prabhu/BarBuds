@@ -3,7 +3,8 @@ import SwiftUI
 
 struct AncControl: View {
     let modes: [AncMode]
-    /// `nil` until the device reports its mode.
+    /// `nil` until the device reports its mode, and while it can't apply one
+    /// (e.g. Pixel Buds report no mode while they're in the case).
     let selected: AncMode?
     let onSelect: (AncMode) -> Void
 
@@ -14,6 +15,12 @@ struct AncControl: View {
                 ForEach(modes, id: \.self) { mode in
                     modeButton(mode)
                 }
+            }
+            .disabled(selected == nil)
+            if selected == nil {
+                Text("Available while wearing your earbuds")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -69,10 +76,20 @@ struct SectionTitle: View {
     }
 }
 
-#Preview {
+#Preview("Worn") {
     AncControl(
         modes: [.off, .noiseCancelling, .transparency],
         selected: .noiseCancelling,
+        onSelect: { _ in }
+    )
+    .padding()
+    .frame(width: 300)
+}
+
+#Preview("In the case") {
+    AncControl(
+        modes: [.off, .noiseCancelling, .transparency],
+        selected: nil,
         onSelect: { _ in }
     )
     .padding()

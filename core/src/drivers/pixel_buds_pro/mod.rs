@@ -18,20 +18,22 @@
 //! Protocol knowledge comes from pbpctrl by Maximilian Luz
 //! (<https://github.com/qzed/pbpctrl>, MIT/Apache-2.0).
 
+#[cfg(test)]
+mod fixtures;
 mod hdlc;
 mod proto;
 mod rpc;
-#[cfg(test)]
-mod fixtures;
 #[cfg(test)]
 mod sim;
 
 use std::collections::VecDeque;
 
 use crate::driver::{Decoded, EarbudDriver, Event};
-use crate::error::BarBudsError;
 use crate::drivers::google::battery_status;
-use crate::model::{AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqUnit, EqSettings};
+use crate::error::BarBudsError;
+use crate::model::{
+    AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
+};
 use prost::Message;
 use proto::{Setting, anc_state, setting_id};
 use rpc::{Method, RpcPacket, packet_type};
@@ -128,8 +130,13 @@ impl PixelBudsProDriver {
                         Method::SubscribeToSettingsChanges,
                         vec![],
                     ));
-                    self.pending_reads =
-                        [setting_id::CURRENT_ANCR_STATE, setting_id::CURRENT_USER_EQ].into();
+                    self.pending_reads = [
+                        setting_id::CURRENT_ANCR_STATE,
+                        setting_id::CURRENT_USER_EQ,
+                        setting_id::VOLUME_EQ_ENABLE,
+                        setting_id::OHD_ENABLE,
+                    ]
+                    .into();
                     self.send_next_read(channel, outbound);
                 }
                 return Ok(None);
@@ -191,6 +198,12 @@ impl PixelBudsProDriver {
             }
             Some(Setting::CurrentUserEq(bands)) => {
                 Ok(Some(Event::Eq(self.eq_settings(bands.gains()))))
+            }
+            Some(Setting::OhdEnable(on)) => {
+                Ok(Some(Event::Toggle(FeatureToggle::InEarDetection, on)))
+            }
+            Some(Setting::VolumeEqEnable(on)) => {
+                Ok(Some(Event::Toggle(FeatureToggle::VolumeEq, on)))
             }
             None => Ok(None), // A setting BarBuds doesn't show.
         }
@@ -264,9 +277,7 @@ impl EarbudDriver for PixelBudsProDriver {
                 presets: PRESETS.to_vec(),
             }),
             has_charging_case: true,
-            // Maestro also has on-head detection and volume EQ settings (pbpctrl
-            // ids 2 and 15), not wired up until they're verified on hardware.
-            toggles: vec![],
+            toggles: vec![FeatureToggle::VolumeEq, FeatureToggle::InEarDetection],
         }
     }
 
@@ -293,7 +304,23 @@ impl EarbudDriver for PixelBudsProDriver {
     }
 
     fn encode_anc(&mut self, mode: AncMode) -> Result<Vec<u8>, BarBudsError> {
-        self.write(Setting::CurrentAncrState(anc_state(mode)), Event::Anc(Some(mode)))
+        self.write(
+            Setting::CurrentAncrState(anc_state(mode)),
+            Event::Anc(Some(mode)),
+        )
+    }
+
+    fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
+        let setting = match toggle {
+            FeatureToggle::InEarDetection => Setting::OhdEnable(on),
+            FeatureToggle::VolumeEq => Setting::VolumeEqEnable(on),
+            FeatureToggle::AdaptiveSound => {
+                return Err(BarBudsError::Unsupported {
+                    feature: format!("{toggle:?}"),
+                });
+            }
+        };
+        self.write(setting, Event::Toggle(toggle, on))
     }
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
@@ -401,6 +428,30 @@ mod tests {
                 gains: vec![1.0, 0.5, 0.0, -1.5, 2.0]
             })
         );
+        assert!(state.toggles[&FeatureToggle::InEarDetection]);
+        assert!(!state.toggles[&FeatureToggle::VolumeEq]);
+    }
+
+    #[test]
+    fn toggles_apply_after_device_confirms() {
+        let (controller, mut sim) = connected();
+        let frame = controller
+            .encode_toggle(FeatureToggle::VolumeEq, true)
+            .unwrap();
+        assert!(!controller.state().toggles[&FeatureToggle::VolumeEq]);
+        assert_eq!(exchange(&controller, &mut sim, frame), None);
+        assert!(controller.state().toggles[&FeatureToggle::VolumeEq]);
+
+        let frame = controller
+            .encode_toggle(FeatureToggle::InEarDetection, false)
+            .unwrap();
+        assert_eq!(exchange(&controller, &mut sim, frame), None);
+        assert!(!controller.state().toggles[&FeatureToggle::InEarDetection]);
+
+        assert!(matches!(
+            controller.encode_toggle(FeatureToggle::AdaptiveSound, true),
+            Err(BarBudsError::Unsupported { .. })
+        ));
     }
 
     #[test]

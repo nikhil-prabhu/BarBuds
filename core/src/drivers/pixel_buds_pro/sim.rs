@@ -18,6 +18,8 @@ pub(crate) struct PixelBudsSim {
     rx: Vec<u8>,
     anc: i32,
     eq: proto::EqBands,
+    ohd: bool,
+    volume_eq: bool,
     battery: proto::BatteryInfo,
     runtime_subscribed: bool,
     settings_subscribed: bool,
@@ -40,6 +42,8 @@ impl PixelBudsSim {
             channel,
             rx: Vec::new(),
             anc: anc_state::ACTIVE,
+            ohd: true,
+            volume_eq: false,
             eq: proto::EqBands::from_gains([1.0, 0.5, 0.0, -1.5, 2.0]),
             battery: proto::BatteryInfo {
                 left: battery(71, false),
@@ -116,6 +120,8 @@ impl PixelBudsSim {
                 let setting = match msg.settings_id {
                     Some(setting_id::CURRENT_ANCR_STATE) => Setting::CurrentAncrState(self.anc),
                     Some(setting_id::CURRENT_USER_EQ) => Setting::CurrentUserEq(self.eq),
+                    Some(setting_id::OHD_ENABLE) => Setting::OhdEnable(self.ohd),
+                    Some(setting_id::VOLUME_EQ_ENABLE) => Setting::VolumeEqEnable(self.volume_eq),
                     other => panic!("unexpected read of setting {other:?}"),
                 };
                 reply(packet_type::RESPONSE, 0, settings_rsp(setting))
@@ -132,6 +138,8 @@ impl PixelBudsSim {
                 match setting {
                     Setting::CurrentAncrState(state) => self.anc = state,
                     Setting::CurrentUserEq(bands) => self.eq = bands,
+                    Setting::OhdEnable(on) => self.ohd = on,
+                    Setting::VolumeEqEnable(on) => self.volume_eq = on,
                 }
                 let mut out = reply(packet_type::RESPONSE, 0, vec![]);
                 out.extend(self.settings_changed(setting));
