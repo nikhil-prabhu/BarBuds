@@ -70,7 +70,13 @@ pub(crate) fn decode(buf: &[u8]) -> Option<(usize, Result<RawFrame<'_>, BarBudsE
     if actual != expected {
         // The length byte itself may be corrupt, so only drop the sync byte
         // and rescan from there rather than trusting `total`.
-        return Some((1, Err(BarBudsError::ChecksumMismatch { expected, actual })));
+        return Some((
+            1,
+            Err(BarBudsError::ChecksumMismatch {
+                expected: expected.into(),
+                actual: actual.into(),
+            }),
+        ));
     }
     Some((total, Ok(RawFrame { frame_type, payload })))
 }

@@ -6,6 +6,8 @@
 pub enum DeviceModel {
     /// Simulated earbuds speaking a made-up protocol, for UI development.
     Mock,
+    /// Google Pixel Buds Pro (1st generation), via the Maestro protocol.
+    PixelBudsPro,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
@@ -26,17 +28,11 @@ pub enum EqPreset {
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
-pub struct EqBand {
-    pub frequency_hz: u32,
-    pub gain_db: f32,
-}
-
-#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct EqSettings {
     pub preset: EqPreset,
-    /// One entry per band in [`EqCapabilities::band_frequencies_hz`], in order.
-    /// Ignored when encoding a non-`Custom` preset; the device applies its own curve.
-    pub bands: Vec<EqBand>,
+    /// One gain per band in [`EqCapabilities::band_labels`], in order.
+    /// Ignored when encoding a non-`Custom` preset; the driver applies the preset's curve.
+    pub gains_db: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
@@ -69,7 +65,9 @@ pub struct DeviceCapabilities {
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct EqCapabilities {
-    pub band_frequencies_hz: Vec<u32>,
+    /// Display name of each band, low to high (e.g. "60 Hz" or "Bass"). Not
+    /// every vendor publishes band frequencies, so these are labels, not numbers.
+    pub band_labels: Vec<String>,
     pub min_gain_db: f32,
     pub max_gain_db: f32,
     pub step_db: f32,

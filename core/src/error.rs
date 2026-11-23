@@ -4,8 +4,8 @@ pub enum BarBudsError {
     #[error("malformed frame: {reason}")]
     MalformedFrame { reason: String },
 
-    #[error("checksum mismatch: expected {expected:#04x}, got {actual:#04x}")]
-    ChecksumMismatch { expected: u8, actual: u8 },
+    #[error("checksum mismatch: expected {expected:#x}, got {actual:#x}")]
+    ChecksumMismatch { expected: u32, actual: u32 },
 
     #[error("unknown frame type {frame_type:#04x}")]
     UnknownFrameType { frame_type: u8 },
@@ -15,11 +15,19 @@ pub enum BarBudsError {
 
     #[error("invalid argument: {reason}")]
     InvalidArgument { reason: String },
+
+    /// The device rejected a request, or the connection isn't ready for it yet.
+    #[error("device error: {reason}")]
+    Device { reason: String },
 }
 
 impl BarBudsError {
     pub(crate) fn malformed(reason: impl Into<String>) -> Self {
         Self::MalformedFrame { reason: reason.into() }
+    }
+
+    pub(crate) fn device(reason: impl Into<String>) -> Self {
+        Self::Device { reason: reason.into() }
     }
 
     pub(crate) fn invalid_argument(reason: impl Into<String>) -> Self {

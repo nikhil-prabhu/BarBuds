@@ -65,11 +65,16 @@ final class EarbudsSession: Identifiable {
 
         readTask = Task { [weak self] in
             for await chunk in transport.incoming {
-                self?.receive(chunk)
+                guard let self else { return }
+                // Some protocols answer replies with follow-up requests while connecting.
+                let outbound = receive(chunk)
+                if !outbound.isEmpty {
+                    await write(outbound)
+                }
             }
             self?.transportClosed(transport)
         }
-        await write(controller.statusRequest())
+        await write(controller.start())
     }
 
     func disconnect() async {
@@ -108,16 +113,16 @@ final class EarbudsSession: Identifiable {
         eqWriteTask = nil
         eqDraft = nil
         // Switching to Custom starts from the curve currently shown.
-        let settings = EqSettings(preset: preset, bands: eq?.bands ?? [])
+        let settings = EqSettings(preset: preset, gainsDb: eq?.gainsDb ?? [])
         Task { await send { try controller.encodeEq(eq: settings) } }
     }
 
     /// Moves one band, switching to the Custom preset. Writes are debounced so
     /// dragging a slider doesn't flood the Bluetooth channel.
     func setGain(_ gainDb: Float, forBandAt index: Int) {
-        guard var draft = eq, draft.bands.indices.contains(index) else { return }
+        guard var draft = eq, draft.gainsDb.indices.contains(index) else { return }
         draft.preset = .custom
-        draft.bands[index].gainDb = gainDb
+        draft.gainsDb[index] = gainDb
         eqDraft = draft
 
         eqWriteTask?.cancel()
@@ -131,7 +136,9 @@ final class EarbudsSession: Identifiable {
 
     // MARK: I/O
 
-    private func receive(_ chunk: Data) {
+    /// Applies bytes read from the device. Returns any frames the protocol
+    /// wants written in response.
+    private func receive(_ chunk: Data) -> Data {
         let previousEq = state.eq
         do {
             state = try controller.feed(bytes: chunk)
@@ -144,6 +151,7 @@ final class EarbudsSession: Identifiable {
         if eqWriteTask == nil, state.eq != previousEq {
             eqDraft = nil
         }
+        return controller.takeOutbound()
     }
 
     private func send(_ encode: () throws -> Data) async {
@@ -172,7 +180,7 @@ extension EarbudsSession {
         let session = EarbudsSession(device: DiscoveredDevice(
             id: id, name: name, model: .mock, makeTransport: { MockTransport() }
         ))
-        let reply = MockEarbuds().receive(bytes: session.controller.statusRequest())
+        let reply = MockEarbuds().receive(bytes: session.controller.start())
         session.state = (try? session.controller.feed(bytes: reply)) ?? session.controller.state()
         session.connection = .connected
         return session

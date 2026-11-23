@@ -13,28 +13,42 @@ const MAX_RX_BUFFER: usize = 4096;
 /// Sans-I/O protocol engine for one device.
 ///
 /// Swift flow:
-/// 1. After the Bluetooth channel opens, write `status_request()` to it.
+/// 1. After the Bluetooth channel opens, write `start()` to it.
 /// 2. Pass every chunk read from the channel to `feed()` and publish the returned state.
+///    Then write whatever `take_outbound()` returns: some protocols answer replies
+///    with follow-up requests during the handshake.
 /// 3. To change a setting, write the frame from `encode_anc()` / `encode_eq()`.
 ///    State updates when the device confirms the change through `feed()`, not when you send it.
 /// 4. On disconnect, call `reset()`.
 #[derive(uniffi::Object)]
 pub struct BarBudsController {
     model: DeviceModel,
-    driver: Box<dyn EarbudDriver>,
+    capabilities: DeviceCapabilities,
     inner: Mutex<Inner>,
 }
 
-#[derive(Default)]
 struct Inner {
+    driver: Box<dyn EarbudDriver>,
     rx: Vec<u8>,
+    outbound: Vec<u8>,
     state: DeviceState,
+}
+
+impl Inner {
+    fn new(model: DeviceModel) -> Self {
+        Self {
+            driver: driver_for(model),
+            rx: Vec::new(),
+            outbound: Vec::new(),
+            state: DeviceState::default(),
+        }
+    }
 }
 
 fn apply(state: &mut DeviceState, event: Event) {
     match event {
         Event::Battery(battery) => state.battery = battery,
-        Event::Anc(mode) => state.anc = Some(mode),
+        Event::Anc(mode) => state.anc = mode,
         Event::Eq(eq) => state.eq = Some(eq),
     }
 }
@@ -51,10 +65,11 @@ impl BarBudsController {
 impl BarBudsController {
     #[uniffi::constructor]
     pub fn new(model: DeviceModel) -> Arc<Self> {
+        let inner = Inner::new(model);
         Arc::new(Self {
             model,
-            driver: driver_for(model),
-            inner: Mutex::new(Inner::default()),
+            capabilities: inner.driver.capabilities(),
+            inner: Mutex::new(inner),
         })
     }
 
@@ -63,7 +78,7 @@ impl BarBudsController {
     }
 
     pub fn capabilities(&self) -> DeviceCapabilities {
-        self.driver.capabilities()
+        self.capabilities.clone()
     }
 
     pub fn state(&self) -> DeviceState {
@@ -77,19 +92,20 @@ impl BarBudsController {
     /// call `state()` to get the up-to-date state.
     pub fn feed(&self, bytes: Vec<u8>) -> Result<DeviceState, BarBudsError> {
         let mut guard = self.inner();
-        let Inner { rx, state } = &mut *guard;
+        let Inner { driver, rx, outbound, state } = &mut *guard;
         rx.extend_from_slice(&bytes);
 
         let mut first_error = None;
         let mut offset = 0;
-        while let Some(decoded) = self.driver.parse_frame(&rx[offset..]) {
+        while let Some(decoded) = driver.parse_frame(&rx[offset..], outbound) {
             debug_assert!(decoded.consumed > 0, "driver must always make progress");
             if decoded.consumed == 0 {
                 break;
             }
             offset += decoded.consumed;
             match decoded.result {
-                Ok(event) => apply(state, event),
+                Ok(Some(event)) => apply(state, event),
+                Ok(None) => {}
                 Err(err) => {
                     first_error.get_or_insert(err);
                 }
@@ -111,37 +127,43 @@ impl BarBudsController {
         }
     }
 
-    /// Frame asking the device to report its full state.
-    pub fn status_request(&self) -> Vec<u8> {
-        self.driver.encode_status_request()
+    /// Frames to write once the channel opens. They ask the device for its full state.
+    pub fn start(&self) -> Vec<u8> {
+        self.inner().driver.start()
+    }
+
+    /// Frames the driver queued while handling `feed()`. Write them to the
+    /// device. Returns an empty buffer when there is nothing to send.
+    pub fn take_outbound(&self) -> Vec<u8> {
+        std::mem::take(&mut self.inner().outbound)
     }
 
     pub fn encode_anc(&self, mode: AncMode) -> Result<Vec<u8>, BarBudsError> {
-        if !self.driver.capabilities().anc_modes.contains(&mode) {
+        if !self.capabilities.anc_modes.contains(&mode) {
             return Err(BarBudsError::Unsupported {
                 feature: format!("ANC mode {mode:?}"),
             });
         }
-        self.driver.encode_anc(mode)
+        self.inner().driver.encode_anc(mode)
     }
 
     pub fn encode_eq(&self, eq: EqSettings) -> Result<Vec<u8>, BarBudsError> {
         let supported = self
-            .driver
-            .capabilities()
+            .capabilities
             .eq
+            .as_ref()
             .is_some_and(|caps| caps.presets.contains(&eq.preset));
         if !supported {
             return Err(BarBudsError::Unsupported {
                 feature: format!("EQ preset {:?}", eq.preset),
             });
         }
-        self.driver.encode_eq(&eq)
+        self.inner().driver.encode_eq(&eq)
     }
 
-    /// Forget buffered bytes and device state, e.g. after a disconnect.
+    /// Forget buffered bytes, protocol state and device state, e.g. after a disconnect.
     pub fn reset(&self) {
-        *self.inner() = Inner::default();
+        *self.inner() = Inner::new(self.model);
     }
 }
 
@@ -149,13 +171,13 @@ impl BarBudsController {
 mod tests {
     use super::*;
     use crate::drivers::mock::MockEarbuds;
-    use crate::model::{BatteryReading, EqBand, EqPreset};
+    use crate::model::{BatteryReading, EqPreset};
 
     fn connected() -> (Arc<BarBudsController>, Arc<MockEarbuds>) {
         let controller = BarBudsController::new(DeviceModel::Mock);
         let device = MockEarbuds::new();
         controller
-            .feed(device.receive(controller.status_request()))
+            .feed(device.receive(controller.start()))
             .unwrap();
         (controller, device)
     }
@@ -187,14 +209,10 @@ mod tests {
     #[test]
     fn custom_eq_round_trip() {
         let (controller, device) = connected();
-        let caps = controller.capabilities().eq.unwrap();
-        let bands = caps
-            .band_frequencies_hz
-            .iter()
-            .zip([1.0, 2.0, 3.0, -2.0, -4.0])
-            .map(|(&frequency_hz, gain_db)| EqBand { frequency_hz, gain_db })
-            .collect::<Vec<_>>();
-        let eq = EqSettings { preset: EqPreset::Custom, bands };
+        let eq = EqSettings {
+            preset: EqPreset::Custom,
+            gains_db: vec![1.0, 2.0, 3.0, -2.0, -4.0],
+        };
         let state = controller
             .feed(device.receive(controller.encode_eq(eq.clone()).unwrap()))
             .unwrap();
@@ -212,7 +230,7 @@ mod tests {
     #[test]
     fn handles_byte_at_a_time_delivery() {
         let controller = BarBudsController::new(DeviceModel::Mock);
-        let reply = MockEarbuds::new().receive(controller.status_request());
+        let reply = MockEarbuds::new().receive(controller.start());
         for byte in reply {
             controller.feed(vec![byte]).unwrap();
         }
@@ -224,7 +242,7 @@ mod tests {
         let controller = BarBudsController::new(DeviceModel::Mock);
         let device = MockEarbuds::new();
         let mut bytes = vec![0xDE, 0xAD];
-        bytes.extend(device.receive(controller.status_request()));
+        bytes.extend(device.receive(controller.start()));
         let err = controller.feed(bytes).unwrap_err();
         assert!(matches!(err, BarBudsError::MalformedFrame { .. }));
         assert_eq!(controller.state().anc, Some(AncMode::NoiseCancelling));

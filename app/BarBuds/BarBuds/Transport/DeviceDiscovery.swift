@@ -19,10 +19,7 @@ nonisolated enum DiscoveryEvent: Sendable {
 
 /// Reports earbuds as they connect to and disconnect from the Mac. A source
 /// first reports every device that is already connected, then reports changes.
-///
-/// The planned IOBluetooth source would list `IOBluetoothDevice.pairedDevices()`
-/// that are connected and match a `DeviceModel`, then follow connect and
-/// disconnect notifications.
+/// See `BluetoothDiscovery` for real hardware.
 nonisolated protocol DeviceDiscovery: Sendable {
     func events() -> AsyncStream<DiscoveryEvent>
 }

@@ -25,8 +25,8 @@ struct EqControl: View {
             }
 
             VStack(spacing: 2) {
-                ForEach(Array(settings.bands.enumerated()), id: \.offset) { index, band in
-                    bandRow(band, index: index)
+                ForEach(Array(settings.gainsDb.enumerated()), id: \.offset) { index, gainDb in
+                    bandRow(gainDb, index: index)
                 }
             }
         }
@@ -36,19 +36,23 @@ struct EqControl: View {
         Binding(get: { settings.preset }, set: onSelectPreset)
     }
 
-    private func bandRow(_ band: EqBand, index: Int) -> some View {
-        HStack(spacing: 8) {
-            Text(Units.frequency(band.frequencyHz))
-                .frame(width: 48, alignment: .leading)
+    private func bandRow(_ gainDb: Float, index: Int) -> some View {
+        let label = capabilities.bandLabels.indices.contains(index)
+            ? capabilities.bandLabels[index]
+            : "Band \(index + 1)"
+        return HStack(spacing: 8) {
+            Text(label)
+                .lineLimit(1)
+                .frame(width: 76, alignment: .leading)
             Slider(
-                value: Binding(get: { band.gainDb }, set: { onSetGain($0, index) }),
+                value: Binding(get: { gainDb }, set: { onSetGain($0, index) }),
                 in: capabilities.minGainDb...capabilities.maxGainDb,
                 step: capabilities.stepDb
             )
             .controlSize(.small)
-            .accessibilityLabel(Units.frequency(band.frequencyHz))
-            .accessibilityValue(Units.gain(band.gainDb))
-            Text(Units.gain(band.gainDb))
+            .accessibilityLabel(label)
+            .accessibilityValue(Units.gain(gainDb))
+            Text(Units.gain(gainDb))
                 .frame(width: 44, alignment: .trailing)
         }
         .font(.caption.monospacedDigit())
@@ -59,17 +63,13 @@ struct EqControl: View {
 #Preview {
     EqControl(
         capabilities: EqCapabilities(
-            bandFrequenciesHz: [60, 250, 1_000, 4_000, 12_000],
+            bandLabels: ["Low Bass", "Bass", "Mid", "Treble", "Upper Treble"],
             minGainDb: -6,
             maxGainDb: 6,
-            stepDb: 1,
+            stepDb: 0.5,
             presets: [.flat, .bassBoost, .vocal, .trebleBoost, .custom]
         ),
-        settings: EqSettings(
-            preset: .bassBoost,
-            bands: zip([60, 250, 1_000, 4_000, 12_000], [5, 3, 0, 0, 0] as [Float])
-                .map { EqBand(frequencyHz: $0, gainDb: $1) }
-        ),
+        settings: EqSettings(preset: .custom, gainsDb: [1, 0.5, 0, -1.5, 2]),
         onSelectPreset: { _ in },
         onSetGain: { _, _ in }
     )

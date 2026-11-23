@@ -52,6 +52,7 @@
         "GENERATE_INFOPLIST_FILE": "YES",
         "INFOPLIST_KEY_CFBundleDisplayName": "BarBuds (DEBUG)",
         "INFOPLIST_KEY_LSUIElement": "YES",
+        "INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription": "BarBuds connects to your earbuds to show their battery and change noise control and EQ.",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]": "YES",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]": "YES",
         "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]": "YES",

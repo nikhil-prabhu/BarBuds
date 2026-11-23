@@ -41,13 +41,6 @@ extension EqPreset {
 }
 
 enum Units {
-    /// 60 → "60 Hz", 1000 → "1 kHz", 12000 → "12 kHz".
-    static func frequency(_ hz: UInt32) -> String {
-        guard hz >= 1_000 else { return "\(hz) Hz" }
-        let khz = (Double(hz) / 1_000).formatted(.number.precision(.fractionLength(0...1)))
-        return "\(khz) kHz"
-    }
-
     /// 3 → "+3 dB", 0 → "0 dB", -2.5 → "−2.5 dB".
     static func gain(_ db: Float) -> String {
         let value = db.formatted(

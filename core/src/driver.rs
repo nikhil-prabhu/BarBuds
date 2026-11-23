@@ -8,7 +8,8 @@ use crate::model::{AncMode, BatteryStatus, DeviceCapabilities, EqSettings};
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Event {
     Battery(BatteryStatus),
-    Anc(AncMode),
+    /// `None`: the device can't say right now (e.g. Pixel Buds in their case).
+    Anc(Option<AncMode>),
     Eq(EqSettings),
 }
 
@@ -18,21 +19,30 @@ pub(crate) struct Decoded {
     /// Bytes to drop from the front of the buffer. Always > 0, including on
     /// errors, so the caller can skip past garbage and resynchronize.
     pub consumed: usize,
-    pub result: Result<Event, BarBudsError>,
+    /// `Ok(None)` for frames that are valid but don't change the UI state,
+    /// such as handshake replies.
+    pub result: Result<Option<Event>, BarBudsError>,
 }
 
-pub(crate) trait EarbudDriver: Send + Sync {
+/// One driver instance serves one connection, so drivers may keep protocol
+/// state (negotiated channels, requests in flight). The controller replaces
+/// the driver with a fresh one on `reset()`.
+pub(crate) trait EarbudDriver: Send {
     fn capabilities(&self) -> DeviceCapabilities;
+
+    /// Frame(s) to write once the channel opens: a handshake or a request for
+    /// the device's full state.
+    fn start(&mut self) -> Vec<u8>;
 
     /// Decode one frame from the front of `buf`. Returns `None` when `buf`
     /// does not yet hold a complete frame. Bluetooth reads may split or
     /// merge frames arbitrarily.
-    fn parse_frame(&self, buf: &[u8]) -> Option<Decoded>;
+    ///
+    /// Protocols with a multi-step handshake append follow-up requests to
+    /// `outbound`, and the controller hands them to Swift to write.
+    fn parse_frame(&mut self, buf: &[u8], outbound: &mut Vec<u8>) -> Option<Decoded>;
 
-    /// Frame(s) asking the device to report its full state. Sent after connecting.
-    fn encode_status_request(&self) -> Vec<u8>;
+    fn encode_anc(&mut self, mode: AncMode) -> Result<Vec<u8>, BarBudsError>;
 
-    fn encode_anc(&self, mode: AncMode) -> Result<Vec<u8>, BarBudsError>;
-
-    fn encode_eq(&self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError>;
+    fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError>;
 }
