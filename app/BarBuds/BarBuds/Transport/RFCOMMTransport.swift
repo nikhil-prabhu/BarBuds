@@ -13,6 +13,7 @@ nonisolated final class RFCOMMTransport: NSObject, EarbudsTransport, @unchecked 
         case deviceNotFound
         case serviceNotFound
         case openFailed(IOReturn)
+        case timedOut
         case notOpen
         case writeFailed(IOReturn)
 
@@ -21,6 +22,7 @@ nonisolated final class RFCOMMTransport: NSObject, EarbudsTransport, @unchecked 
             case .deviceNotFound: "The earbuds are no longer paired."
             case .serviceNotFound: "The earbuds don’t offer a control channel."
             case .openFailed(let status): "Couldn’t open the control channel (\(Self.describe(status)))."
+            case .timedOut: "The earbuds didn’t answer."
             case .notOpen: "The control channel is closed."
             case .writeFailed(let status): "Couldn’t send to the earbuds (\(Self.describe(status)))."
             }
@@ -39,8 +41,15 @@ nonisolated final class RFCOMMTransport: NSObject, EarbudsTransport, @unchecked 
     private struct State {
         var channel: IOBluetoothRFCOMMChannel?
         var opening: CheckedContinuation<Void, any Error>?
+        /// Numbers open attempts, so a timeout only abandons its own attempt.
+        var attempt = 0
     }
     private let state = Mutex(State())
+
+    /// How long one open attempt may take. Opening a channel to a connected
+    /// device normally takes well under a second.
+    private static let openTimeout: Duration = .seconds(5)
+    private static let retryDelay: Duration = .seconds(1)
 
     private static let log = Logger(subsystem: "com.nikhilprabhu.BarBuds", category: "rfcomm")
 
@@ -61,9 +70,29 @@ nonisolated final class RFCOMMTransport: NSObject, EarbudsTransport, @unchecked 
 
     // MARK: EarbudsTransport
 
+    /// Opens the channel, retrying once if the attempt fails or times out.
+    ///
+    /// IOBluetooth silently drops an open requested before the process's
+    /// Bluetooth connection has finished powering on (logged as "API MISUSE …
+    /// powered on state"), which leaves the attempt hanging forever. That can
+    /// happen when a device is found right at launch, hence the timeout.
     func open() async throws {
+        do {
+            try await openOnce()
+        } catch Failure.timedOut, Failure.openFailed, Failure.notOpen {
+            Self.log.info("Opening RFCOMM to \(self.address, privacy: .public) failed; retrying once")
+            try await Task.sleep(for: Self.retryDelay)
+            try await openOnce()
+        }
+    }
+
+    private func openOnce() async throws {
         try await withCheckedThrowingContinuation { (opening: CheckedContinuation<Void, any Error>) in
-            Task { @MainActor in self.beginOpen(opening) }
+            Task { @MainActor in
+                let attempt = self.beginOpen(opening)
+                try? await Task.sleep(for: Self.openTimeout)
+                self.abandonOpen(attempt)
+            }
         }
     }
 
@@ -85,17 +114,24 @@ nonisolated final class RFCOMMTransport: NSObject, EarbudsTransport, @unchecked 
 
     // MARK: Main thread
 
+    /// Starts one open attempt and returns its number.
     @MainActor
-    private func beginOpen(_ opening: CheckedContinuation<Void, any Error>) {
+    private func beginOpen(_ opening: CheckedContinuation<Void, any Error>) -> Int {
+        let attempt = state.withLock { state in
+            state.attempt += 1
+            return state.attempt
+        }
         guard let device = IOBluetoothDevice(addressString: address) else {
-            return opening.resume(throwing: Failure.deviceNotFound)
+            opening.resume(throwing: Failure.deviceNotFound)
+            return attempt
         }
         var channelID: BluetoothRFCOMMChannelID = 0
         guard let uuid = Self.sdpUUID(serviceUUID),
               let record = device.getServiceRecord(for: uuid),
               record.getRFCOMMChannelID(&channelID) == kIOReturnSuccess
         else {
-            return opening.resume(throwing: Failure.serviceNotFound)
+            opening.resume(throwing: Failure.serviceNotFound)
+            return attempt
         }
 
         state.withLock { $0.opening = opening }
@@ -103,12 +139,31 @@ nonisolated final class RFCOMMTransport: NSObject, EarbudsTransport, @unchecked 
         let status = device.openRFCOMMChannelAsync(&channel, withChannelID: channelID, delegate: self)
         guard status == kIOReturnSuccess else {
             takeOpening()?.resume(throwing: Failure.openFailed(status))
-            return
+            return attempt
         }
         // The open-complete callback can't run before this returns: it's
         // delivered on this same (main) run loop.
         state.withLock { $0.channel = channel }
         Self.log.debug("Opening RFCOMM channel \(channelID) to \(self.address, privacy: .public)")
+        return attempt
+    }
+
+    /// Gives up on `attempt` if it's still waiting for the device.
+    @MainActor
+    private func abandonOpen(_ attempt: Int) {
+        let pending = state.withLock { state -> (CheckedContinuation<Void, any Error>, IOBluetoothRFCOMMChannel?)? in
+            guard state.attempt == attempt, let opening = state.opening else { return nil }
+            defer {
+                state.opening = nil
+                state.channel = nil
+            }
+            return (opening, state.channel)
+        }
+        guard let (opening, channel) = pending else { return }
+        Self.log.info("Opening RFCOMM to \(self.address, privacy: .public) timed out")
+        channel?.setDelegate(nil)
+        channel?.close()
+        opening.resume(throwing: Failure.timedOut)
     }
 
     @MainActor
