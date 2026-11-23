@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::driver::{Event, EarbudDriver};
 use crate::drivers::driver_for;
 use crate::error::BarBudsError;
-use crate::model::{AncMode, DeviceCapabilities, DeviceModel, DeviceState, EqSettings};
+use crate::model::{AncMode, DeviceCapabilities, DeviceModel, DeviceState, EqSettings, FeatureToggle};
 
 /// Drop buffered bytes past this size; a well-behaved device never gets close.
 const MAX_RX_BUFFER: usize = 4096;
@@ -50,6 +50,9 @@ fn apply(state: &mut DeviceState, event: Event) {
         Event::Battery(battery) => state.battery = battery,
         Event::Anc(mode) => state.anc = mode,
         Event::Eq(eq) => state.eq = Some(eq),
+        Event::Toggle(toggle, on) => {
+            state.toggles.insert(toggle, on);
+        }
     }
 }
 
@@ -161,6 +164,17 @@ impl BarBudsController {
         self.inner().driver.encode_eq(&eq)
     }
 
+    /// Frame turning an on/off feature on or off. The state changes once the
+    /// device confirms it through `feed()`.
+    pub fn encode_toggle(&self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
+        if !self.capabilities.toggles.contains(&toggle) {
+            return Err(BarBudsError::Unsupported {
+                feature: format!("{toggle:?}"),
+            });
+        }
+        self.inner().driver.encode_toggle(toggle, on)
+    }
+
     /// Forget buffered bytes, protocol state and device state, e.g. after a disconnect.
     pub fn reset(&self) {
         *self.inner() = Inner::new(self.model);
@@ -211,7 +225,7 @@ mod tests {
         let (controller, device) = connected();
         let eq = EqSettings {
             preset: EqPreset::Custom,
-            gains_db: vec![1.0, 2.0, 3.0, -2.0, -4.0],
+            gains: vec![1.0, 2.0, 3.0, -2.0, -4.0],
         };
         let state = controller
             .feed(device.receive(controller.encode_eq(eq.clone()).unwrap()))

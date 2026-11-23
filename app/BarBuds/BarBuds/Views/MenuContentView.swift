@@ -90,6 +90,15 @@ private struct DeviceControls: View {
             )
         }
 
+        if !capabilities.toggles.isEmpty {
+            Divider()
+            FeatureToggles(
+                toggles: capabilities.toggles,
+                values: session.state.toggles,
+                onSet: { session.setToggle($0, on: $1) }
+            )
+        }
+
         if let error = session.lastError {
             Label(error, systemImage: "exclamationmark.triangle")
                 .font(.caption)

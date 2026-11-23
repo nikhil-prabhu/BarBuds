@@ -33,5 +33,5 @@ pub fn rfcomm_service_uuid(model: DeviceModel) -> Option<String> {
 /// Every device model the core has a driver for.
 #[uniffi::export]
 pub fn supported_models() -> Vec<DeviceModel> {
-    vec![DeviceModel::Mock, DeviceModel::PixelBudsPro]
+    vec![DeviceModel::Mock, DeviceModel::PixelBudsPro, DeviceModel::PixelBudsASeries]
 }

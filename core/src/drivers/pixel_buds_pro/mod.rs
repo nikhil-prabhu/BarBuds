@@ -30,12 +30,10 @@ use std::collections::VecDeque;
 
 use crate::driver::{Decoded, EarbudDriver, Event};
 use crate::error::BarBudsError;
-use crate::model::{
-    AncMode, BatteryReading, BatteryStatus, DeviceCapabilities, EqCapabilities, EqPreset,
-    EqSettings,
-};
+use crate::drivers::google::battery_status;
+use crate::model::{AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqUnit, EqSettings};
 use prost::Message;
-use proto::{Setting, anc_state, battery_state, setting_id};
+use proto::{Setting, anc_state, setting_id};
 use rpc::{Method, RpcPacket, packet_type};
 
 /// RFCOMM service UUID the earbuds advertise for Maestro.
@@ -200,11 +198,11 @@ impl PixelBudsProDriver {
 
     fn eq_settings(&self, gains: [f32; 5]) -> EqSettings {
         if let Some(last) = &self.last_eq
-            && same_curve(&last.gains_db, &gains)
+            && same_curve(&last.gains, &gains)
         {
             return EqSettings {
                 preset: last.preset,
-                gains_db: gains.to_vec(),
+                gains: gains.to_vec(),
             };
         }
         let preset = PRESETS
@@ -213,7 +211,7 @@ impl PixelBudsProDriver {
             .unwrap_or(EqPreset::Custom);
         EqSettings {
             preset,
-            gains_db: gains.to_vec(),
+            gains: gains.to_vec(),
         }
     }
 
@@ -248,25 +246,6 @@ fn anc_state(mode: AncMode) -> i32 {
     }
 }
 
-fn battery_reading(info: &Option<proto::DeviceBatteryInfo>) -> Option<BatteryReading> {
-    let info = info.as_ref()?;
-    if info.state == battery_state::UNKNOWN {
-        return None;
-    }
-    Some(BatteryReading {
-        percent: info.level.clamp(0, 100) as u8,
-        charging: info.state == battery_state::CHARGING,
-    })
-}
-
-fn battery_status(info: &proto::BatteryInfo) -> BatteryStatus {
-    BatteryStatus {
-        left: battery_reading(&info.left),
-        right: battery_reading(&info.right),
-        charging_case: battery_reading(&info.case),
-    }
-}
-
 impl EarbudDriver for PixelBudsProDriver {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
@@ -278,12 +257,16 @@ impl EarbudDriver for PixelBudsProDriver {
             ],
             eq: Some(EqCapabilities {
                 band_labels: BAND_LABELS.map(String::from).to_vec(),
-                min_gain_db: MIN_GAIN_DB,
-                max_gain_db: MAX_GAIN_DB,
-                step_db: 0.5,
+                unit: EqUnit::Decibels,
+                min_gain: MIN_GAIN_DB,
+                max_gain: MAX_GAIN_DB,
+                step: 0.5,
                 presets: PRESETS.to_vec(),
             }),
             has_charging_case: true,
+            // Maestro also has on-head detection and volume EQ settings (pbpctrl
+            // ids 2 and 15), not wired up until they're verified on hardware.
+            toggles: vec![],
         }
     }
 
@@ -316,11 +299,11 @@ impl EarbudDriver for PixelBudsProDriver {
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
         let gains = match preset_curve(eq.preset) {
             Some(curve) => curve,
-            None => custom_gains(&eq.gains_db)?,
+            None => custom_gains(&eq.gains)?,
         };
         let settings = EqSettings {
             preset: eq.preset,
-            gains_db: gains.to_vec(),
+            gains: gains.to_vec(),
         };
         let frame = self.write(
             Setting::CurrentUserEq(proto::EqBands::from_gains(gains)),
@@ -331,9 +314,9 @@ impl EarbudDriver for PixelBudsProDriver {
     }
 }
 
-fn custom_gains(gains_db: &[f32]) -> Result<[f32; 5], BarBudsError> {
-    let gains: [f32; 5] = gains_db.try_into().map_err(|_| {
-        BarBudsError::invalid_argument(format!("expected 5 EQ bands, got {}", gains_db.len()))
+fn custom_gains(gains: &[f32]) -> Result<[f32; 5], BarBudsError> {
+    let gains: [f32; 5] = gains.try_into().map_err(|_| {
+        BarBudsError::invalid_argument(format!("expected 5 EQ bands, got {}", gains.len()))
     })?;
     if let Some(label) = gains
         .iter()
@@ -355,7 +338,7 @@ mod tests {
     use super::sim::PixelBudsSim;
     use super::*;
     use crate::controller::BarBudsController;
-    use crate::model::{DeviceModel, DeviceState};
+    use crate::model::{BatteryReading, DeviceModel, DeviceState};
 
     /// Deliver `bytes` to the simulated earbuds and keep relaying in both
     /// directions until neither side has anything more to send, like the
@@ -415,7 +398,7 @@ mod tests {
             state.eq,
             Some(EqSettings {
                 preset: EqPreset::Custom,
-                gains_db: vec![1.0, 0.5, 0.0, -1.5, 2.0]
+                gains: vec![1.0, 0.5, 0.0, -1.5, 2.0]
             })
         );
     }
@@ -470,17 +453,17 @@ mod tests {
 
         let bass = EqSettings {
             preset: EqPreset::BassBoost,
-            gains_db: vec![],
+            gains: vec![],
         };
         exchange(&controller, &mut sim, controller.encode_eq(bass).unwrap());
         let eq = controller.state().eq.unwrap();
         assert_eq!(eq.preset, EqPreset::BassBoost);
-        assert_eq!(eq.gains_db, [5.0, 3.0, 0.0, 0.0, 0.0]);
+        assert_eq!(eq.gains, [5.0, 3.0, 0.0, 0.0, 0.0]);
 
         // Custom gains are clamped to the device range.
         let custom = EqSettings {
             preset: EqPreset::Custom,
-            gains_db: vec![-9.0, 0.0, 1.5, 0.0, 9.0],
+            gains: vec![-9.0, 0.0, 1.5, 0.0, 9.0],
         };
         exchange(&controller, &mut sim, controller.encode_eq(custom).unwrap());
         assert_eq!(sim.eq(), [-6.0, 0.0, 1.5, 0.0, 6.0]);
@@ -489,7 +472,7 @@ mod tests {
         // A Custom curve that happens to be flat stays Custom.
         let flat_custom = EqSettings {
             preset: EqPreset::Custom,
-            gains_db: vec![0.0; 5],
+            gains: vec![0.0; 5],
         };
         exchange(
             &controller,
@@ -502,10 +485,10 @@ mod tests {
     #[test]
     fn custom_eq_rejects_wrong_band_count_and_nan() {
         let (controller, _) = connected();
-        for gains_db in [vec![0.0; 3], vec![0.0, f32::NAN, 0.0, 0.0, 0.0]] {
+        for gains in [vec![0.0; 3], vec![0.0, f32::NAN, 0.0, 0.0, 0.0]] {
             let eq = EqSettings {
                 preset: EqPreset::Custom,
-                gains_db,
+                gains,
             };
             assert!(matches!(
                 controller.encode_eq(eq),

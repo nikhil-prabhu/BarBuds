@@ -28,6 +28,24 @@ extension AncMode {
     }
 }
 
+extension FeatureToggle {
+    var title: String {
+        switch self {
+        case .inEarDetection: "In-Ear Detection"
+        case .adaptiveSound: "Adaptive Sound"
+        case .volumeEq: "Volume EQ"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .inEarDetection: "Pause when you take an earbud out"
+        case .adaptiveSound: "Raise volume in noisy places"
+        case .volumeEq: "Keep bass and treble full at low volume"
+        }
+    }
+}
+
 extension EqPreset {
     var title: String {
         switch self {
@@ -41,13 +59,16 @@ extension EqPreset {
 }
 
 enum Units {
-    /// 3 → "+3 dB", 0 → "0 dB", -2.5 → "−2.5 dB".
-    static func gain(_ db: Float) -> String {
-        let value = db.formatted(
+    /// Decibels: 3 → "+3 dB", 0 → "0 dB", -2.5 → "-2.5 dB". Levels: 2 → "+2".
+    static func gain(_ value: Float, unit: EqUnit) -> String {
+        let number = value.formatted(
             .number
                 .sign(strategy: .always(includingZero: false))
                 .precision(.fractionLength(0...1))
         )
-        return "\(value) dB"
+        switch unit {
+        case .decibels: return "\(number) dB"
+        case .level: return number
+        }
     }
 }

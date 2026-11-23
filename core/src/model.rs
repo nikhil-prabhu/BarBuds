@@ -1,6 +1,8 @@
 //! Vendor-neutral device state shared with Swift. Every driver translates its
 //! wire format into these types, so the UI never sees vendor specifics.
 
+use std::collections::HashMap;
+
 /// A supported earbud model. Each variant maps to one driver in `drivers/`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum DeviceModel {
@@ -8,6 +10,8 @@ pub enum DeviceModel {
     Mock,
     /// Google Pixel Buds Pro (1st generation), via the Maestro protocol.
     PixelBudsPro,
+    /// Google Pixel Buds A-Series.
+    PixelBudsASeries,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
@@ -15,6 +19,18 @@ pub enum AncMode {
     Off,
     NoiseCancelling,
     Transparency,
+}
+
+/// An on/off device feature. The UI owns titles and descriptions, so each
+/// variant means the same thing for every vendor that supports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum FeatureToggle {
+    /// Pause playback when a bud is taken out (on-head / in-ear detection).
+    InEarDetection,
+    /// Raise volume automatically in noisy surroundings.
+    AdaptiveSound,
+    /// Boost bass and treble at low volume so music doesn't sound thin.
+    VolumeEq,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
@@ -30,9 +46,9 @@ pub enum EqPreset {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct EqSettings {
     pub preset: EqPreset,
-    /// One gain per band in [`EqCapabilities::band_labels`], in order.
+    /// One gain per band in [`EqCapabilities::band_labels`], in [`EqCapabilities::unit`].
     /// Ignored when encoding a non-`Custom` preset; the driver applies the preset's curve.
-    pub gains_db: Vec<f32>,
+    pub gains: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
@@ -61,6 +77,8 @@ pub struct DeviceCapabilities {
     /// `None` when the model has no EQ control.
     pub eq: Option<EqCapabilities>,
     pub has_charging_case: bool,
+    /// On/off features the device supports, in display order.
+    pub toggles: Vec<FeatureToggle>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -68,10 +86,21 @@ pub struct EqCapabilities {
     /// Display name of each band, low to high (e.g. "60 Hz" or "Bass"). Not
     /// every vendor publishes band frequencies, so these are labels, not numbers.
     pub band_labels: Vec<String>,
-    pub min_gain_db: f32,
-    pub max_gain_db: f32,
-    pub step_db: f32,
+    /// Gains are in this unit.
+    pub unit: EqUnit,
+    pub min_gain: f32,
+    pub max_gain: f32,
+    pub step: f32,
+    /// A model without built-in curves lists only `Custom`.
     pub presets: Vec<EqPreset>,
+}
+
+/// What an EQ gain value means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum EqUnit {
+    Decibels,
+    /// Device-defined steps with no published dB value (e.g. bass level -1…4).
+    Level,
 }
 
 /// Last known state reported by the device. Fields stay `None` until the device
@@ -81,4 +110,6 @@ pub struct DeviceState {
     pub battery: BatteryStatus,
     pub anc: Option<AncMode>,
     pub eq: Option<EqSettings>,
+    /// The confirmed value of each supported toggle the device has reported.
+    pub toggles: HashMap<FeatureToggle, bool>,
 }

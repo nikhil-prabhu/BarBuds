@@ -16,7 +16,7 @@ pub use device::MockEarbuds;
 
 use crate::driver::{Decoded, Event, EarbudDriver};
 use crate::error::BarBudsError;
-use crate::model::{AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings};
+use crate::model::{AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqUnit, EqSettings, FeatureToggle};
 use codec::frame_type;
 
 pub(crate) const BAND_COUNT: usize = 5;
@@ -38,20 +38,20 @@ fn preset_curve(preset: EqPreset) -> Option<[i8; BAND_COUNT]> {
 fn eq_settings(preset: EqPreset, gains: &[i8; BAND_COUNT]) -> EqSettings {
     EqSettings {
         preset,
-        gains_db: gains.iter().map(|&gain| f32::from(gain)).collect(),
+        gains: gains.iter().map(|&gain| f32::from(gain)).collect(),
     }
 }
 
 /// Round slider values to the device's 1 dB steps and clamp to its range.
-fn quantize_gains(gains_db: &[f32]) -> Result<[i8; BAND_COUNT], BarBudsError> {
-    if gains_db.len() != BAND_COUNT {
+fn quantize_gains(gains: &[f32]) -> Result<[i8; BAND_COUNT], BarBudsError> {
+    if gains.len() != BAND_COUNT {
         return Err(BarBudsError::invalid_argument(format!(
             "expected {BAND_COUNT} EQ bands, got {}",
-            gains_db.len()
+            gains.len()
         )));
     }
-    let mut gains = [0i8; BAND_COUNT];
-    for ((gain, &gain_db), label) in gains.iter_mut().zip(gains_db).zip(BAND_LABELS) {
+    let mut quantized = [0i8; BAND_COUNT];
+    for ((gain, &gain_db), label) in quantized.iter_mut().zip(gains).zip(BAND_LABELS) {
         if !gain_db.is_finite() {
             return Err(BarBudsError::invalid_argument(format!(
                 "EQ gain for {label} is not a finite number"
@@ -61,7 +61,7 @@ fn quantize_gains(gains_db: &[f32]) -> Result<[i8; BAND_COUNT], BarBudsError> {
             .round()
             .clamp(f32::from(MIN_GAIN_DB), f32::from(MAX_GAIN_DB)) as i8;
     }
-    Ok(gains)
+    Ok(quantized)
 }
 
 pub(crate) struct MockDriver;
@@ -73,9 +73,10 @@ impl EarbudDriver for MockDriver {
             anc_modes: vec![AncMode::Off, AncMode::NoiseCancelling, AncMode::Transparency],
             eq: Some(EqCapabilities {
                 band_labels: BAND_LABELS.map(String::from).to_vec(),
-                min_gain_db: f32::from(MIN_GAIN_DB),
-                max_gain_db: f32::from(MAX_GAIN_DB),
-                step_db: 1.0,
+                unit: EqUnit::Decibels,
+                min_gain: f32::from(MIN_GAIN_DB),
+                max_gain: f32::from(MAX_GAIN_DB),
+                step: 1.0,
                 presets: vec![
                     EqPreset::Flat,
                     EqPreset::BassBoost,
@@ -85,6 +86,7 @@ impl EarbudDriver for MockDriver {
                 ],
             }),
             has_charging_case: true,
+            toggles: codec::TOGGLES.to_vec(),
         }
     }
 
@@ -93,6 +95,8 @@ impl EarbudDriver for MockDriver {
         let result = frame.and_then(|frame| match frame.frame_type {
             frame_type::BATTERY => codec::decode_battery(frame.payload).map(Event::Battery),
             frame_type::ANC => codec::decode_anc(frame.payload).map(|mode| Event::Anc(Some(mode))),
+            frame_type::TOGGLE => codec::decode_toggle(frame.payload)
+                .map(|(toggle, on)| Event::Toggle(toggle, on)),
             frame_type::EQ => codec::decode_eq(frame.payload)
                 .map(|(preset, gains)| Event::Eq(eq_settings(preset, &gains))),
             other => Err(BarBudsError::UnknownFrameType { frame_type: other }),
@@ -108,10 +112,14 @@ impl EarbudDriver for MockDriver {
         Ok(codec::encode(frame_type::SET_ANC, &[codec::anc_to_byte(mode)]))
     }
 
+    fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
+        Ok(codec::encode(frame_type::SET_TOGGLE, &codec::toggle_payload(toggle, on)))
+    }
+
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
         let gains = match preset_curve(eq.preset) {
             Some(curve) => curve,
-            None => quantize_gains(&eq.gains_db)?,
+            None => quantize_gains(&eq.gains)?,
         };
         Ok(codec::encode(frame_type::SET_EQ, &codec::eq_payload(eq.preset, &gains)))
     }
@@ -125,7 +133,7 @@ mod tests {
     fn custom_eq_is_rounded_and_clamped() {
         let eq = EqSettings {
             preset: EqPreset::Custom,
-            gains_db: vec![-9.0, -0.4, 0.6, 2.5, 12.0],
+            gains: vec![-9.0, -0.4, 0.6, 2.5, 12.0],
         };
         let frame = MockDriver.encode_eq(&eq).unwrap();
         let (_, raw) = codec::decode(&frame).unwrap();
@@ -137,7 +145,7 @@ mod tests {
     fn preset_eq_ignores_supplied_bands() {
         let eq = EqSettings {
             preset: EqPreset::BassBoost,
-            gains_db: vec![],
+            gains: vec![],
         };
         let frame = MockDriver.encode_eq(&eq).unwrap();
         let (_, raw) = codec::decode(&frame).unwrap();
@@ -150,7 +158,7 @@ mod tests {
     fn custom_eq_rejects_wrong_band_count_and_nan() {
         let short = EqSettings {
             preset: EqPreset::Custom,
-            gains_db: vec![0.0; 3],
+            gains: vec![0.0; 3],
         };
         assert!(matches!(
             MockDriver.encode_eq(&short),
@@ -158,7 +166,7 @@ mod tests {
         ));
         let nan = EqSettings {
             preset: EqPreset::Custom,
-            gains_db: vec![0.0, f32::NAN, 0.0, 0.0, 0.0],
+            gains: vec![0.0, f32::NAN, 0.0, 0.0, 0.0],
         };
         assert!(matches!(
             MockDriver.encode_eq(&nan),

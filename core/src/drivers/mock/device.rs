@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::codec::{self, frame_type};
 use super::{BAND_COUNT, MAX_GAIN_DB, MIN_GAIN_DB, preset_curve};
-use crate::model::{AncMode, BatteryReading, BatteryStatus, EqPreset};
+use crate::model::{AncMode, BatteryReading, BatteryStatus, EqPreset, FeatureToggle};
 
 #[derive(uniffi::Object)]
 pub struct MockEarbuds {
@@ -18,6 +18,8 @@ struct SimState {
     anc: AncMode,
     preset: EqPreset,
     gains: [i8; BAND_COUNT],
+    /// On/off state per entry of `codec::TOGGLES`.
+    toggles: [bool; 3],
     rx: Vec<u8>,
 }
 
@@ -30,6 +32,12 @@ impl SimState {
         codec::encode(frame_type::ANC, &[codec::anc_to_byte(self.anc)])
     }
 
+    fn toggle_frame(&self, toggle: FeatureToggle) -> Vec<u8> {
+        let [id, _] = codec::toggle_payload(toggle, false);
+        let on = self.toggles[id as usize];
+        codec::encode(frame_type::TOGGLE, &codec::toggle_payload(toggle, on))
+    }
+
     fn eq_frame(&self) -> Vec<u8> {
         codec::encode(frame_type::EQ, &codec::eq_payload(self.preset, &self.gains))
     }
@@ -39,12 +47,24 @@ impl SimState {
     fn handle(&mut self, frame_type: u8, payload: &[u8]) -> Vec<u8> {
         match frame_type {
             frame_type::STATUS_REQUEST => {
-                [self.battery_frame(), self.anc_frame(), self.eq_frame()].concat()
+                let toggles = codec::TOGGLES.iter().flat_map(|&t| self.toggle_frame(t));
+                [self.battery_frame(), self.anc_frame(), self.eq_frame()]
+                    .concat()
+                    .into_iter()
+                    .chain(toggles)
+                    .collect()
             }
             frame_type::SET_ANC => match codec::decode_anc(payload) {
                 Ok(mode) => {
                     self.anc = mode;
                     self.anc_frame()
+                }
+                Err(_) => Vec::new(),
+            },
+            frame_type::SET_TOGGLE => match codec::decode_toggle(payload) {
+                Ok((toggle, on)) => {
+                    self.toggles[codec::toggle_payload(toggle, on)[0] as usize] = on;
+                    self.toggle_frame(toggle)
                 }
                 Err(_) => Vec::new(),
             },
@@ -83,6 +103,7 @@ impl MockEarbuds {
                 anc: AncMode::NoiseCancelling,
                 preset: EqPreset::Flat,
                 gains: preset_curve(EqPreset::Flat).expect("Flat has a curve"),
+                toggles: [true, false, true],
                 rx: Vec::new(),
             }),
         })

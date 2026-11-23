@@ -2,7 +2,7 @@
 //! Swift talks to [`crate::BarBudsController`], which owns a driver.
 
 use crate::error::BarBudsError;
-use crate::model::{AncMode, BatteryStatus, DeviceCapabilities, EqSettings};
+use crate::model::{AncMode, BatteryStatus, DeviceCapabilities, EqSettings, FeatureToggle};
 
 /// A state change decoded from one inbound frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -11,6 +11,7 @@ pub(crate) enum Event {
     /// `None`: the device can't say right now (e.g. Pixel Buds in their case).
     Anc(Option<AncMode>),
     Eq(EqSettings),
+    Toggle(FeatureToggle, bool),
 }
 
 /// The outcome of decoding the frame at the front of a receive buffer.
@@ -45,4 +46,10 @@ pub(crate) trait EarbudDriver: Send {
     fn encode_anc(&mut self, mode: AncMode) -> Result<Vec<u8>, BarBudsError>;
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError>;
+
+    /// Only called for toggles listed in `capabilities().toggles`.
+    fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
+        let _ = on;
+        Err(BarBudsError::Unsupported { feature: format!("{toggle:?}") })
+    }
 }

@@ -108,21 +108,25 @@ final class EarbudsSession: Identifiable {
         Task { await send { try controller.encodeAnc(mode: mode) } }
     }
 
+    func setToggle(_ toggle: FeatureToggle, on: Bool) {
+        Task { await send { try controller.encodeToggle(toggle: toggle, on: on) } }
+    }
+
     func selectEqPreset(_ preset: EqPreset) {
         eqWriteTask?.cancel()
         eqWriteTask = nil
         eqDraft = nil
         // Switching to Custom starts from the curve currently shown.
-        let settings = EqSettings(preset: preset, gainsDb: eq?.gainsDb ?? [])
+        let settings = EqSettings(preset: preset, gains: eq?.gains ?? [])
         Task { await send { try controller.encodeEq(eq: settings) } }
     }
 
     /// Moves one band, switching to the Custom preset. Writes are debounced so
     /// dragging a slider doesn't flood the Bluetooth channel.
-    func setGain(_ gainDb: Float, forBandAt index: Int) {
-        guard var draft = eq, draft.gainsDb.indices.contains(index) else { return }
+    func setGain(_ gain: Float, forBandAt index: Int) {
+        guard var draft = eq, draft.gains.indices.contains(index) else { return }
         draft.preset = .custom
-        draft.gainsDb[index] = gainDb
+        draft.gains[index] = gain
         eqDraft = draft
 
         eqWriteTask?.cancel()

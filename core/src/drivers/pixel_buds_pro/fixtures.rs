@@ -84,7 +84,7 @@ fn captured_handshake() {
         state.eq,
         Some(EqSettings {
             preset: EqPreset::Custom,
-            gains_db: vec![-1.0, 0.0, 4.0, 2.0, 0.0]
+            gains: vec![-1.0, 0.0, 4.0, 2.0, 0.0]
         })
     );
 }

@@ -3,7 +3,7 @@
 
 use super::BAND_COUNT;
 use crate::error::BarBudsError;
-use crate::model::{AncMode, BatteryReading, BatteryStatus, EqPreset};
+use crate::model::{AncMode, BatteryReading, BatteryStatus, EqPreset, FeatureToggle};
 
 pub(crate) const MAGIC: u8 = 0xBB;
 const HEADER_LEN: usize = 3; // magic, type, len
@@ -14,10 +14,12 @@ pub(crate) mod frame_type {
     pub const BATTERY: u8 = 0x01;
     pub const ANC: u8 = 0x02;
     pub const EQ: u8 = 0x03;
+    pub const TOGGLE: u8 = 0x04;
     // Host -> device commands.
     pub const STATUS_REQUEST: u8 = 0x80;
     pub const SET_ANC: u8 = 0x81;
     pub const SET_EQ: u8 = 0x82;
+    pub const SET_TOGGLE: u8 = 0x83;
 }
 
 const BATTERY_ABSENT: u8 = 0x7F;
@@ -194,6 +196,26 @@ pub(crate) fn decode_eq(payload: &[u8]) -> Result<(EqPreset, [i8; BAND_COUNT]), 
         *gain = byte as i8;
     }
     Ok((preset, gains))
+}
+
+// --- FeatureToggle: [toggle id, 0 = off / 1 = on] ---
+
+pub(crate) const TOGGLES: [FeatureToggle; 3] = [FeatureToggle::InEarDetection, FeatureToggle::AdaptiveSound, FeatureToggle::VolumeEq];
+
+pub(crate) fn toggle_payload(toggle: FeatureToggle, on: bool) -> [u8; 2] {
+    let id = TOGGLES.iter().position(|&t| t == toggle).expect("all toggles have ids");
+    [id as u8, u8::from(on)]
+}
+
+pub(crate) fn decode_toggle(payload: &[u8]) -> Result<(FeatureToggle, bool), BarBudsError> {
+    expect_len(payload, 2, "toggle")?;
+    let toggle = *TOGGLES
+        .get(payload[0] as usize)
+        .ok_or_else(|| BarBudsError::malformed(format!("unknown toggle {}", payload[0])))?;
+    match payload[1] {
+        0 | 1 => Ok((toggle, payload[1] == 1)),
+        other => Err(BarBudsError::malformed(format!("toggle value {other}"))),
+    }
 }
 
 #[cfg(test)]
