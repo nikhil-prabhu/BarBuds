@@ -11,11 +11,23 @@ pub(crate) use crate::drivers::google::{BatteryInfo, DeviceBatteryInfo, battery_
 
 /// `AllegroSettingType`: which setting `ReadSetting` should return.
 pub(crate) mod setting_id {
-    /// On-head detection.
-    pub const OHD_ENABLE: i32 = 2;
     pub const CURRENT_ANCR_STATE: i32 = 13;
-    pub const VOLUME_EQ_ENABLE: i32 = 15;
     pub const CURRENT_USER_EQ: i32 = 16;
+}
+
+/// The on/off settings BarBuds shows, by `AllegroSettingType` ID. Each is a
+/// `bool` field of `SettingValue` with the same number.
+pub(crate) mod bool_setting {
+    /// On-head (in-ear) detection.
+    pub const OHD_ENABLE: i32 = 2;
+    /// Touch gestures.
+    pub const GESTURE_ENABLE: i32 = 4;
+    pub const MULTIPOINT_ENABLE: i32 = 11;
+    pub const VOLUME_EQ_ENABLE: i32 = 15;
+    /// Mono audio.
+    pub const SUM_TO_MONO: i32 = 19;
+    /// Conversation Detection.
+    pub const SPEECH_DETECTION: i32 = 22;
 }
 
 /// `AncState`, the value of the `current_ancr_state` setting.
@@ -52,22 +64,57 @@ pub(crate) struct SettingsRsp {
 /// decode as `value: None`.
 #[derive(Clone, PartialEq, Message)]
 pub(crate) struct SettingValue {
-    #[prost(oneof = "Setting", tags = "2, 13, 15, 16")]
+    #[prost(oneof = "Setting", tags = "2, 4, 11, 13, 15, 16, 19, 22")]
     pub value: Option<Setting>,
 }
 
 #[derive(Clone, PartialEq, Oneof)]
 pub(crate) enum Setting {
-    /// On-head (in-ear) detection.
     #[prost(bool, tag = "2")]
     OhdEnable(bool),
+    #[prost(bool, tag = "4")]
+    GestureEnable(bool),
+    #[prost(bool, tag = "11")]
+    MultipointEnable(bool),
     #[prost(bool, tag = "15")]
     VolumeEqEnable(bool),
+    #[prost(bool, tag = "19")]
+    SumToMono(bool),
+    #[prost(bool, tag = "22")]
+    SpeechDetection(bool),
     /// An [`anc_state`] value.
     #[prost(int32, tag = "13")]
     CurrentAncrState(i32),
     #[prost(message, tag = "16")]
     CurrentUserEq(EqBands),
+}
+
+impl Setting {
+    /// The setting for [`bool_setting`] `id`, or `None` if `id` isn't one.
+    pub fn from_bool(id: i32, on: bool) -> Option<Self> {
+        Some(match id {
+            bool_setting::OHD_ENABLE => Setting::OhdEnable(on),
+            bool_setting::GESTURE_ENABLE => Setting::GestureEnable(on),
+            bool_setting::MULTIPOINT_ENABLE => Setting::MultipointEnable(on),
+            bool_setting::VOLUME_EQ_ENABLE => Setting::VolumeEqEnable(on),
+            bool_setting::SUM_TO_MONO => Setting::SumToMono(on),
+            bool_setting::SPEECH_DETECTION => Setting::SpeechDetection(on),
+            _ => return None,
+        })
+    }
+
+    /// The [`bool_setting`] ID and value, for on/off settings.
+    pub fn as_bool(&self) -> Option<(i32, bool)> {
+        Some(match *self {
+            Setting::OhdEnable(on) => (bool_setting::OHD_ENABLE, on),
+            Setting::GestureEnable(on) => (bool_setting::GESTURE_ENABLE, on),
+            Setting::MultipointEnable(on) => (bool_setting::MULTIPOINT_ENABLE, on),
+            Setting::VolumeEqEnable(on) => (bool_setting::VOLUME_EQ_ENABLE, on),
+            Setting::SumToMono(on) => (bool_setting::SUM_TO_MONO, on),
+            Setting::SpeechDetection(on) => (bool_setting::SPEECH_DETECTION, on),
+            Setting::CurrentAncrState(_) | Setting::CurrentUserEq(_) => return None,
+        })
+    }
 }
 
 /// `EqBands`: gains in dB, from -6.0 to 6.0.
@@ -144,9 +191,22 @@ mod tests {
     }
 
     #[test]
+    fn bool_settings_round_trip() {
+        for id in [2, 4, 11, 15, 19, 22] {
+            let setting = Setting::from_bool(id, true).unwrap();
+            assert_eq!(setting.as_bool(), Some((id, true)));
+            let bytes = write_setting(setting.clone());
+            let msg = WriteSettingMsg::decode(bytes.as_slice()).unwrap();
+            assert_eq!(msg.setting.unwrap().value, Some(setting), "setting {id}");
+        }
+        assert_eq!(Setting::from_bool(13, true), None);
+    }
+
+    #[test]
     fn unknown_settings_decode_as_none() {
-        // SettingsRsp.value = SettingValue.multipoint_enable (field 11) = true.
-        let rsp = SettingsRsp::decode(&[0x22, 0x02, 0x58, 0x01][..]).unwrap();
+        // SettingsRsp.value = SettingValue.volume_exposure_notifications
+        // (field 21, key 21 << 3 = 0xA8 0x01) = true.
+        let rsp = SettingsRsp::decode(&[0x22, 0x03, 0xA8, 0x01, 0x01][..]).unwrap();
         assert_eq!(rsp.value, Some(SettingValue { value: None }));
     }
 }

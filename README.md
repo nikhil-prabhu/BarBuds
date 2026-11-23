@@ -12,7 +12,7 @@ BarBuds lives in the menu bar and automatically lists every supported pair of ea
 
 | Earbuds | Battery (left, right, case) | Noise control | EQ | Settings |
 |---|---|---|---|---|
-| Google Pixel Buds Pro (1st gen) | ✓ | Off, Noise Cancelling, Transparency | 5-band (±6 dB) with presets | Volume EQ, In-Ear Detection |
+| Google Pixel Buds Pro (1st gen) | ✓ | Off, Noise Cancelling, Transparency | 5-band (±6 dB) with presets | Conversation Detection, Volume EQ, Multipoint, In-Ear Detection, Touch Controls, Mono Audio |
 | Google Pixel Buds A-Series | ✓ | – | Bass level (−1 to +4) | Adaptive Sound, Volume EQ, In-Ear Detection |
 
 Settings changed elsewhere, such as from your phone or with a gesture on the earbuds, update in BarBuds as the earbuds report them. Pixel Buds Pro only report a noise-control mode while they're being worn, so noise control is unavailable while they're in the case (when in-ear detection is turned on).

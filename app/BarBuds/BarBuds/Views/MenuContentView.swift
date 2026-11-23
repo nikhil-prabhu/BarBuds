@@ -40,6 +40,8 @@ struct MenuContentView: View {
 /// Battery, noise control and EQ for one device.
 private struct DeviceControls: View {
     let session: EarbudsSession
+    /// Shared by every device and remembered across launches.
+    @AppStorage("settingsExpanded") private var settingsExpanded = false
 
     var body: some View {
         switch session.connection {
@@ -95,6 +97,7 @@ private struct DeviceControls: View {
             FeatureToggles(
                 toggles: capabilities.toggles,
                 values: session.state.toggles,
+                isExpanded: $settingsExpanded,
                 onSet: { session.setToggle($0, on: $1) }
             )
         }

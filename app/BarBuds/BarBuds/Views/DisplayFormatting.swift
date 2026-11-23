@@ -34,6 +34,10 @@ extension FeatureToggle {
         case .inEarDetection: "In-Ear Detection"
         case .adaptiveSound: "Adaptive Sound"
         case .volumeEq: "Volume EQ"
+        case .conversationDetection: "Conversation Detection"
+        case .multipoint: "Multipoint"
+        case .monoAudio: "Mono Audio"
+        case .touchControls: "Touch Controls"
         }
     }
 
@@ -42,6 +46,10 @@ extension FeatureToggle {
         case .inEarDetection: "Pause when you take an earbud out"
         case .adaptiveSound: "Raise volume in noisy places"
         case .volumeEq: "Keep bass and treble full at low volume"
+        case .conversationDetection: "Pause audio when you start talking. Works only with both earbuds in."
+        case .multipoint: "Stay connected to two devices at once"
+        case .monoAudio: "Play the same audio in both earbuds"
+        case .touchControls: "Tap and swipe on the earbuds"
         }
     }
 }

@@ -1,10 +1,12 @@
 //! A simulated pair of Pixel Buds Pro for tests: just enough of the Maestro
 //! server side to exercise the driver end to end.
 
+use std::collections::HashMap;
+
 use prost::Message;
 
 use super::proto::{
-    self, Setting, SettingValue, SettingsRsp, anc_state, battery_state, setting_id,
+    self, Setting, SettingValue, SettingsRsp, anc_state, battery_state, bool_setting, setting_id,
 };
 use super::rpc::{self, Method, RpcPacket, packet_type};
 use super::{hdlc, rpc::MAESTRO_SERVICE};
@@ -18,8 +20,8 @@ pub(crate) struct PixelBudsSim {
     rx: Vec<u8>,
     anc: i32,
     eq: proto::EqBands,
-    ohd: bool,
-    volume_eq: bool,
+    /// On/off settings by ID.
+    bools: HashMap<i32, bool>,
     battery: proto::BatteryInfo,
     runtime_subscribed: bool,
     settings_subscribed: bool,
@@ -42,8 +44,14 @@ impl PixelBudsSim {
             channel,
             rx: Vec::new(),
             anc: anc_state::ACTIVE,
-            ohd: true,
-            volume_eq: false,
+            bools: HashMap::from([
+                (bool_setting::OHD_ENABLE, true),
+                (bool_setting::GESTURE_ENABLE, true),
+                (bool_setting::MULTIPOINT_ENABLE, true),
+                (bool_setting::VOLUME_EQ_ENABLE, false),
+                (bool_setting::SUM_TO_MONO, false),
+                (bool_setting::SPEECH_DETECTION, false),
+            ]),
             eq: proto::EqBands::from_gains([1.0, 0.5, 0.0, -1.5, 2.0]),
             battery: proto::BatteryInfo {
                 left: battery(71, false),
@@ -120,8 +128,9 @@ impl PixelBudsSim {
                 let setting = match msg.settings_id {
                     Some(setting_id::CURRENT_ANCR_STATE) => Setting::CurrentAncrState(self.anc),
                     Some(setting_id::CURRENT_USER_EQ) => Setting::CurrentUserEq(self.eq),
-                    Some(setting_id::OHD_ENABLE) => Setting::OhdEnable(self.ohd),
-                    Some(setting_id::VOLUME_EQ_ENABLE) => Setting::VolumeEqEnable(self.volume_eq),
+                    Some(id) if self.bools.contains_key(&id) => {
+                        Setting::from_bool(id, self.bools[&id]).unwrap()
+                    }
                     other => panic!("unexpected read of setting {other:?}"),
                 };
                 reply(packet_type::RESPONSE, 0, settings_rsp(setting))
@@ -138,8 +147,10 @@ impl PixelBudsSim {
                 match setting {
                     Setting::CurrentAncrState(state) => self.anc = state,
                     Setting::CurrentUserEq(bands) => self.eq = bands,
-                    Setting::OhdEnable(on) => self.ohd = on,
-                    Setting::VolumeEqEnable(on) => self.volume_eq = on,
+                    ref other => {
+                        let (id, on) = other.as_bool().unwrap();
+                        self.bools.insert(id, on);
+                    }
                 }
                 let mut out = reply(packet_type::RESPONSE, 0, vec![]);
                 out.extend(self.settings_changed(setting));

@@ -31,6 +31,14 @@ pub enum FeatureToggle {
     AdaptiveSound,
     /// Boost bass and treble at low volume so music doesn't sound thin.
     VolumeEq,
+    /// Pause audio when the wearer starts talking.
+    ConversationDetection,
+    /// Stay connected to two source devices at once.
+    Multipoint,
+    /// Play the same mixed-down audio in both buds.
+    MonoAudio,
+    /// Tap and swipe gestures on the buds.
+    TouchControls,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]

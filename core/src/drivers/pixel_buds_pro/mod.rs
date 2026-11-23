@@ -35,7 +35,21 @@ use crate::model::{
     AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
 };
 use prost::Message;
-use proto::{Setting, anc_state, setting_id};
+use proto::{Setting, anc_state, bool_setting, setting_id};
+
+/// The on/off features shown, in display order, with their Maestro setting
+/// IDs from pbpctrl. Volume EQ and in-ear detection are verified on hardware.
+const TOGGLES: [(FeatureToggle, i32); 6] = [
+    (
+        FeatureToggle::ConversationDetection,
+        bool_setting::SPEECH_DETECTION,
+    ),
+    (FeatureToggle::VolumeEq, bool_setting::VOLUME_EQ_ENABLE),
+    (FeatureToggle::Multipoint, bool_setting::MULTIPOINT_ENABLE),
+    (FeatureToggle::InEarDetection, bool_setting::OHD_ENABLE),
+    (FeatureToggle::TouchControls, bool_setting::GESTURE_ENABLE),
+    (FeatureToggle::MonoAudio, bool_setting::SUM_TO_MONO),
+];
 use rpc::{Method, RpcPacket, packet_type};
 
 /// RFCOMM service UUID the earbuds advertise for Maestro.
@@ -130,13 +144,9 @@ impl PixelBudsProDriver {
                         Method::SubscribeToSettingsChanges,
                         vec![],
                     ));
-                    self.pending_reads = [
-                        setting_id::CURRENT_ANCR_STATE,
-                        setting_id::CURRENT_USER_EQ,
-                        setting_id::VOLUME_EQ_ENABLE,
-                        setting_id::OHD_ENABLE,
-                    ]
-                    .into();
+                    self.pending_reads =
+                        [setting_id::CURRENT_ANCR_STATE, setting_id::CURRENT_USER_EQ].into();
+                    self.pending_reads.extend(TOGGLES.iter().map(|&(_, id)| id));
                     self.send_next_read(channel, outbound);
                 }
                 return Ok(None);
@@ -199,11 +209,13 @@ impl PixelBudsProDriver {
             Some(Setting::CurrentUserEq(bands)) => {
                 Ok(Some(Event::Eq(self.eq_settings(bands.gains()))))
             }
-            Some(Setting::OhdEnable(on)) => {
-                Ok(Some(Event::Toggle(FeatureToggle::InEarDetection, on)))
-            }
-            Some(Setting::VolumeEqEnable(on)) => {
-                Ok(Some(Event::Toggle(FeatureToggle::VolumeEq, on)))
+            Some(setting) => {
+                let (id, on) = setting.as_bool().expect("other settings are matched above");
+                let toggle = TOGGLES
+                    .iter()
+                    .find(|&&(_, t)| t == id)
+                    .map(|&(toggle, _)| toggle);
+                Ok(toggle.map(|toggle| Event::Toggle(toggle, on)))
             }
             None => Ok(None), // A setting BarBuds doesn't show.
         }
@@ -277,7 +289,7 @@ impl EarbudDriver for PixelBudsProDriver {
                 presets: PRESETS.to_vec(),
             }),
             has_charging_case: true,
-            toggles: vec![FeatureToggle::VolumeEq, FeatureToggle::InEarDetection],
+            toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
         }
     }
 
@@ -311,15 +323,13 @@ impl EarbudDriver for PixelBudsProDriver {
     }
 
     fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
-        let setting = match toggle {
-            FeatureToggle::InEarDetection => Setting::OhdEnable(on),
-            FeatureToggle::VolumeEq => Setting::VolumeEqEnable(on),
-            FeatureToggle::AdaptiveSound => {
-                return Err(BarBudsError::Unsupported {
-                    feature: format!("{toggle:?}"),
-                });
-            }
-        };
+        let setting = TOGGLES
+            .iter()
+            .find(|&&(t, _)| t == toggle)
+            .and_then(|&(_, id)| Setting::from_bool(id, on))
+            .ok_or_else(|| BarBudsError::Unsupported {
+                feature: format!("{toggle:?}"),
+            })?;
         self.write(setting, Event::Toggle(toggle, on))
     }
 
@@ -430,6 +440,21 @@ mod tests {
         );
         assert!(state.toggles[&FeatureToggle::InEarDetection]);
         assert!(!state.toggles[&FeatureToggle::VolumeEq]);
+    }
+
+    #[test]
+    fn reads_and_writes_every_toggle() {
+        let (controller, mut sim) = connected();
+        let caps = controller.capabilities();
+        assert_eq!(caps.toggles.len(), 6);
+        assert!(!caps.toggles.contains(&FeatureToggle::AdaptiveSound));
+        let state = controller.state();
+        for &toggle in &caps.toggles {
+            let on = state.toggles[&toggle];
+            let frame = controller.encode_toggle(toggle, !on).unwrap();
+            assert_eq!(exchange(&controller, &mut sim, frame), None);
+            assert_eq!(controller.state().toggles[&toggle], !on, "{toggle:?}");
+        }
     }
 
     #[test]
