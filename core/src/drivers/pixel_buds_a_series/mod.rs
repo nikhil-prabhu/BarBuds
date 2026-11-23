@@ -31,7 +31,7 @@
 use prost::Message;
 
 use crate::driver::{Decoded, EarbudDriver, Event};
-use crate::drivers::google::{self, RuntimeInfo};
+use crate::drivers::google::{self, FirmwareVersion, HardwareInfo, RuntimeInfo, SoftwareInfo};
 use crate::error::BarBudsError;
 use crate::model::{
     AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
@@ -52,7 +52,9 @@ mod endpoint {
 }
 
 mod message {
+    pub const SOFTWARE_INFO: u8 = 0x02;
     pub const INFO_REQUEST: u8 = 0x04;
+    pub const HARDWARE_INFO: u8 = 0x05;
     pub const RUNTIME_INFO: u8 = 0x06;
     pub const READ_SETTING: u8 = 0x08;
     pub const WRITE_SETTING: u8 = 0x09;
@@ -164,6 +166,21 @@ fn encode_setting(id: u32, value: u64) -> Vec<u8> {
     SettingMessage { setting }.encode_to_vec()
 }
 
+/// The A-Series report a six-digit build such as "300581", which the Pixel
+/// Buds app shows as "3.581.0" (confirmed on hardware): the first digit is the
+/// major version and the rest the minor. Anything else is shown as reported.
+fn display_version(version: &FirmwareVersion) -> Option<String> {
+    let build = version.build.as_str();
+    if build.is_empty() {
+        return None;
+    }
+    let (major, minor) = build.split_at(1);
+    match (build.len(), major.parse::<u32>(), minor.parse::<u32>()) {
+        (6, Ok(major), Ok(minor)) => Some(format!("{major}.{minor}.0")),
+        _ => Some(build.to_string()),
+    }
+}
+
 /// Writes a setting, then reads it back, as the Pixel Buds app does.
 fn write_setting(id: u32, value: u64) -> Vec<u8> {
     let mut frames = encode(
@@ -181,6 +198,22 @@ pub(crate) struct PixelBudsASeriesDriver;
 impl PixelBudsASeriesDriver {
     fn handle(&self, message_type: u8, payload: &[u8]) -> Result<Option<Event>, BarBudsError> {
         match message_type {
+            message::SOFTWARE_INFO => {
+                let info = SoftwareInfo::decode(payload)
+                    .map_err(|err| BarBudsError::malformed(format!("bad software info: {err}")))?;
+                // The case entry just repeats the buds' version (the Pixel
+                // Buds app showed a different case version), so leave it out.
+                let firmware = google::firmware(&info, display_version).map(|mut firmware| {
+                    firmware.charging_case = None;
+                    firmware
+                });
+                Ok(firmware.map(Event::Firmware))
+            }
+            message::HARDWARE_INFO => {
+                let info = HardwareInfo::decode(payload)
+                    .map_err(|err| BarBudsError::malformed(format!("bad hardware info: {err}")))?;
+                Ok(google::serial_numbers(&info).map(Event::SerialNumbers))
+            }
             message::RUNTIME_INFO => {
                 let info = RuntimeInfo::decode(payload)
                     .map_err(|err| BarBudsError::malformed(format!("bad runtime info: {err}")))?;
@@ -497,6 +530,67 @@ mod tests {
             controller.encode_eq(eq),
             Err(BarBudsError::InvalidArgument { .. })
         ));
+    }
+
+    #[test]
+    fn firmware_and_serial_numbers() {
+        // Synthetic `87 02` and `87 05` messages in the captured layout; the
+        // real ones carry identifying values, so they aren't fixtures.
+        let version = |build: &str| {
+            Some(FirmwareVersion {
+                build: build.to_string(),
+                version_string: String::new(),
+            })
+        };
+        let software = SoftwareInfo {
+            firmware: Some(google::FirmwareInfo {
+                case: version("300581"),
+                right: version("300581"),
+                left: version("300581"),
+            }),
+        };
+        let hardware = HardwareInfo {
+            serial_numbers: Some(google::SerialNumbers {
+                case: "SIMCASE01".to_string(),
+                right: "SIMUR01".to_string(),
+                left: "SIMUL01".to_string(),
+            }),
+        };
+        let controller = BarBudsController::new(DeviceModel::PixelBudsASeries);
+        let mut bytes = encode(
+            endpoint::CONTROL,
+            message::SOFTWARE_INFO,
+            &software.encode_to_vec(),
+        );
+        bytes.extend(encode(
+            endpoint::CONTROL,
+            message::HARDWARE_INFO,
+            &hardware.encode_to_vec(),
+        ));
+        controller.feed(bytes).unwrap();
+
+        let info = controller.state().info;
+        // What the Pixel Buds app showed for these builds.
+        assert_eq!(info.firmware.left.as_deref(), Some("3.581.0"));
+        assert_eq!(info.firmware.right.as_deref(), Some("3.581.0"));
+        // Not reported: the case entry repeats the buds' version.
+        assert_eq!(info.firmware.charging_case, None);
+        assert_eq!(info.serial_numbers.left.as_deref(), Some("SIMUL01"));
+        assert_eq!(
+            info.serial_numbers.charging_case.as_deref(),
+            Some("SIMCASE01")
+        );
+    }
+
+    #[test]
+    fn unexpected_build_formats_are_shown_as_is() {
+        let version = |build: &str| FirmwareVersion {
+            build: build.to_string(),
+            version_string: String::new(),
+        };
+        assert_eq!(display_version(&version("1.2.3")).as_deref(), Some("1.2.3"));
+        assert_eq!(display_version(&version("12345")).as_deref(), Some("12345"));
+        assert_eq!(display_version(&version("")), None);
     }
 
     #[test]

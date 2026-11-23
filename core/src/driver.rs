@@ -2,7 +2,9 @@
 //! Swift talks to [`crate::BarBudsController`], which owns a driver.
 
 use crate::error::BarBudsError;
-use crate::model::{AncMode, BatteryStatus, DeviceCapabilities, EqSettings, FeatureToggle};
+use crate::model::{
+    AncMode, BatteryStatus, ComponentStrings, DeviceCapabilities, EqSettings, FeatureToggle,
+};
 
 /// A state change decoded from one inbound frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -12,6 +14,8 @@ pub(crate) enum Event {
     Anc(Option<AncMode>),
     Eq(EqSettings),
     Toggle(FeatureToggle, bool),
+    Firmware(ComponentStrings),
+    SerialNumbers(ComponentStrings),
 }
 
 /// The outcome of decoding the frame at the front of a receive buffer.

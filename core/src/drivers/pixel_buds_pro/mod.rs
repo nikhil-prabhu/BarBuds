@@ -29,7 +29,7 @@ mod sim;
 use std::collections::VecDeque;
 
 use crate::driver::{Decoded, EarbudDriver, Event};
-use crate::drivers::google::battery_status;
+use crate::drivers::google::{self, HardwareInfo, SoftwareInfo, battery_status};
 use crate::error::BarBudsError;
 use crate::model::{
     AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
@@ -138,6 +138,7 @@ impl PixelBudsProDriver {
                 if method == Method::GetSoftwareInfo && ok {
                     let channel = packet.channel_id;
                     self.channel = Some(channel);
+                    outbound.extend(self.request(channel, Method::GetHardwareInfo, vec![]));
                     outbound.extend(self.request(channel, Method::SubscribeRuntimeInfo, vec![]));
                     outbound.extend(self.request(
                         channel,
@@ -148,6 +149,10 @@ impl PixelBudsProDriver {
                         [setting_id::CURRENT_ANCR_STATE, setting_id::CURRENT_USER_EQ].into();
                     self.pending_reads.extend(TOGGLES.iter().map(|&(_, id)| id));
                     self.send_next_read(channel, outbound);
+                    // The probe reply is the software info: the firmware versions.
+                    let info = decode::<SoftwareInfo>(&packet.payload)?;
+                    let firmware = google::firmware(&info, google::version_string_or_build);
+                    return Ok(firmware.map(Event::Firmware));
                 }
                 return Ok(None);
             }
@@ -179,6 +184,13 @@ impl PixelBudsProDriver {
                 if packet.packet_type == packet_type::SERVER_STREAM =>
             {
                 self.setting_event(decode(&packet.payload)?)
+            }
+            Method::GetHardwareInfo if is_reply => {
+                if !ok {
+                    return Err(failed("reading serial numbers"));
+                }
+                let info = decode::<HardwareInfo>(&packet.payload)?;
+                Ok(google::serial_numbers(&info).map(Event::SerialNumbers))
             }
             Method::ReadSetting if is_reply => {
                 self.send_next_read(channel, outbound);
@@ -440,6 +452,22 @@ mod tests {
         );
         assert!(state.toggles[&FeatureToggle::InEarDetection]);
         assert!(!state.toggles[&FeatureToggle::VolumeEq]);
+    }
+
+    #[test]
+    fn handshake_reads_firmware_and_serial_numbers() {
+        let (controller, _) = connected();
+        let info = controller.state().info;
+        let release = Some("release_5.11_signed".to_string());
+        assert_eq!(info.firmware.left, release);
+        assert_eq!(info.firmware.right, release);
+        assert_eq!(info.firmware.charging_case, release);
+        assert_eq!(info.serial_numbers.left.as_deref(), Some("SIMLEFT01"));
+        assert_eq!(info.serial_numbers.right.as_deref(), Some("SIMRIGHT01"));
+        assert_eq!(
+            info.serial_numbers.charging_case.as_deref(),
+            Some("SIMCASE01")
+        );
     }
 
     #[test]

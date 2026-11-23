@@ -180,12 +180,19 @@ final class EarbudsSession: Identifiable {
 extension EarbudsSession {
     /// A session already filled in from the simulated earbuds, for static
     /// previews. It has no transport, so changing settings does nothing.
-    static func preview(name: String = "Mock Buds", id: String = "preview") -> EarbudsSession {
+    static func preview(
+        name: String = "Mock Buds",
+        id: String = "preview",
+        info: DeviceInfo? = nil
+    ) -> EarbudsSession {
         let session = EarbudsSession(device: DiscoveredDevice(
             id: id, name: name, model: .mock, makeTransport: { MockTransport() }
         ))
         let reply = MockEarbuds().receive(bytes: session.controller.start())
         session.state = (try? session.controller.feed(bytes: reply)) ?? session.controller.state()
+        if let info {
+            session.state.info = info
+        }
         session.connection = .connected
         return session
     }

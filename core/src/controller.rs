@@ -53,6 +53,8 @@ fn apply(state: &mut DeviceState, event: Event) {
         Event::Toggle(toggle, on) => {
             state.toggles.insert(toggle, on);
         }
+        Event::Firmware(firmware) => state.info.firmware = firmware,
+        Event::SerialNumbers(serials) => state.info.serial_numbers = serials,
     }
 }
 

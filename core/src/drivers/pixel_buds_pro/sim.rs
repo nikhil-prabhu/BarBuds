@@ -3,6 +3,10 @@
 
 use std::collections::HashMap;
 
+use crate::drivers::google::{
+    FirmwareInfo, FirmwareVersion, HardwareInfo, SerialNumbers, SoftwareInfo,
+};
+
 use prost::Message;
 
 use super::proto::{
@@ -114,7 +118,8 @@ impl PixelBudsSim {
         }
 
         match Method::from_packet(&request).expect("driver calls known methods") {
-            Method::GetSoftwareInfo => reply(packet_type::RESPONSE, 0, vec![]),
+            Method::GetSoftwareInfo => reply(packet_type::RESPONSE, 0, software_info()),
+            Method::GetHardwareInfo => reply(packet_type::RESPONSE, 0, hardware_info()),
             Method::SubscribeRuntimeInfo => {
                 self.runtime_subscribed = true;
                 reply(packet_type::SERVER_STREAM, 0, self.runtime_info())
@@ -214,6 +219,36 @@ fn settings_rsp(setting: Setting) -> Vec<u8> {
     SettingsRsp {
         value: Some(SettingValue {
             value: Some(setting),
+        }),
+    }
+    .encode_to_vec()
+}
+
+/// The firmware your Buds Pro reported: build "575", "release_5.11_signed".
+fn software_info() -> Vec<u8> {
+    let version = || {
+        Some(FirmwareVersion {
+            build: "575".to_string(),
+            version_string: "release_5.11_signed".to_string(),
+        })
+    };
+    SoftwareInfo {
+        firmware: Some(FirmwareInfo {
+            case: version(),
+            right: version(),
+            left: version(),
+        }),
+    }
+    .encode_to_vec()
+}
+
+/// Made-up serial numbers.
+fn hardware_info() -> Vec<u8> {
+    HardwareInfo {
+        serial_numbers: Some(SerialNumbers {
+            case: "SIMCASE01".to_string(),
+            right: "SIMRIGHT01".to_string(),
+            left: "SIMLEFT01".to_string(),
         }),
     }
     .encode_to_vec()

@@ -18,6 +18,12 @@ import SwiftUI
         }
         .menuBarExtraStyle(.window)
         
+        Window("About These Earbuds", id: "device-info") {
+            DeviceInfoView(devices: devices)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Window("About BarBuds", id: "about") {
             AboutView()
         }

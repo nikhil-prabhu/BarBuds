@@ -120,4 +120,22 @@ pub struct DeviceState {
     pub eq: Option<EqSettings>,
     /// The confirmed value of each supported toggle the device has reported.
     pub toggles: HashMap<FeatureToggle, bool>,
+    /// Firmware versions and serial numbers, once the device has reported them.
+    pub info: DeviceInfo,
+}
+
+/// One string per component, e.g. a firmware version. `None` when the
+/// component hasn't reported it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct ComponentStrings {
+    pub left: Option<String>,
+    pub right: Option<String>,
+    pub charging_case: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct DeviceInfo {
+    /// As the vendor's app displays it, e.g. "release_5.11_signed" or "3.581.0".
+    pub firmware: ComponentStrings,
+    pub serial_numbers: ComponentStrings,
 }

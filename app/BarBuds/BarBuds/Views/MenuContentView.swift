@@ -133,6 +133,11 @@ private struct MenuHeader: View {
                         .disabled(devices.selected == nil)
                 }
                 #endif
+                Button("About These Earbuds") {
+                    NSApp.activate()
+                    openWindow(id: "device-info")
+                }
+                .disabled(devices.selected == nil)
                 Button("About BarBuds") {
                     NSApp.activate()
                     openWindow(id: "about")

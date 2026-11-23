@@ -72,6 +72,7 @@ pub(crate) const fn hash(name: &str) -> u32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Method {
     GetSoftwareInfo,
+    GetHardwareInfo,
     SubscribeRuntimeInfo,
     WriteSetting,
     ReadSetting,
@@ -81,8 +82,9 @@ pub(crate) enum Method {
 pub(crate) const MAESTRO_SERVICE: u32 = hash("maestro_pw.Maestro");
 
 impl Method {
-    const ALL: [Method; 5] = [
+    const ALL: [Method; 6] = [
         Method::GetSoftwareInfo,
+        Method::GetHardwareInfo,
         Method::SubscribeRuntimeInfo,
         Method::WriteSetting,
         Method::ReadSetting,
@@ -92,6 +94,7 @@ impl Method {
     const fn name(self) -> &'static str {
         match self {
             Method::GetSoftwareInfo => "GetSoftwareInfo",
+            Method::GetHardwareInfo => "GetHardwareInfo",
             Method::SubscribeRuntimeInfo => "SubscribeRuntimeInfo",
             Method::WriteSetting => "WriteSetting",
             Method::ReadSetting => "ReadSetting",
