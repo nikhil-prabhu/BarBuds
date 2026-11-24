@@ -4,13 +4,14 @@ import SwiftUI
 struct BatteryView: View {
     let battery: BatteryStatus
     let hasChargingCase: Bool
+    let formFactor: FormFactor
 
     var body: some View {
         HStack(spacing: 8) {
-            BatteryGauge(title: "Left", reading: battery.left)
-            BatteryGauge(title: "Right", reading: battery.right)
+            BatteryGauge(title: "Left", systemImage: formFactor.leftSymbol, reading: battery.left)
+            BatteryGauge(title: "Right", systemImage: formFactor.rightSymbol, reading: battery.right)
             if hasChargingCase {
-                BatteryGauge(title: "Case", reading: battery.chargingCase)
+                BatteryGauge(title: "Case", systemImage: FormFactor.caseSymbol, reading: battery.chargingCase)
             }
         }
     }
@@ -18,6 +19,7 @@ struct BatteryView: View {
 
 private struct BatteryGauge: View {
     let title: String
+    let systemImage: String
     /// `nil` when the component isn't reporting (e.g. a bud is in a closed case).
     let reading: BatteryReading?
 
@@ -31,11 +33,13 @@ private struct BatteryGauge: View {
             .frame(width: 52, height: 52)
             .opacity(reading == nil ? 0.4 : 1)
 
-            HStack(spacing: 2) {
+            HStack(spacing: 3) {
+                Image(systemName: systemImage)
+                Text(title)
                 if reading?.charging == true {
                     Image(systemName: "bolt.fill")
+                        .foregroundStyle(tint)
                 }
-                Text(title)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -87,7 +91,8 @@ private struct BatteryRing<Label: View>: View {
             right: BatteryReading(percent: 15, charging: false),
             chargingCase: BatteryReading(percent: 64, charging: true)
         ),
-        hasChargingCase: true
+        hasChargingCase: true,
+        formFactor: .stemless
     )
     .padding()
     .frame(width: 300)

@@ -28,6 +28,35 @@ extension AncMode {
     }
 }
 
+/// Generic, unbranded SF Symbols for each shape. (Product symbols such as
+/// `airpods` may only be used for Apple's own products.)
+extension FormFactor {
+    var pairSymbol: String {
+        switch self {
+        case .stemmed: "earbuds"
+        case .stemmedInEar: "earbuds.in.ear"
+        case .stemless: "earbuds.stemless"
+        case .earHook: "earbuds.bone.conduction"
+        }
+    }
+
+    var leftSymbol: String {
+        switch self {
+        case .stemmed: "earbud.left"
+        default: pairSymbol + ".left"
+        }
+    }
+
+    var rightSymbol: String {
+        switch self {
+        case .stemmed: "earbud.right"
+        default: pairSymbol + ".right"
+        }
+    }
+
+    static let caseSymbol = "earbuds.case.fill"
+}
+
 extension FeatureToggle {
     var title: String {
         switch self {

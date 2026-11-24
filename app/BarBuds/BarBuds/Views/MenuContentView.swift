@@ -71,7 +71,11 @@ private struct DeviceControls: View {
     private var connected: some View {
         let capabilities = session.capabilities
 
-        BatteryView(battery: session.state.battery, hasChargingCase: capabilities.hasChargingCase)
+        BatteryView(
+            battery: session.state.battery,
+            hasChargingCase: capabilities.hasChargingCase,
+            formFactor: capabilities.formFactor
+        )
 
         if !capabilities.ancModes.isEmpty {
             Divider()
@@ -115,7 +119,14 @@ private struct MenuHeader: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 10) {
+            if let session = devices.selected {
+                Image(systemName: session.capabilities.formFactor.pairSymbol)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 title
                 if let session = devices.selected {
@@ -163,10 +174,12 @@ private struct MenuHeader: View {
         if devices.sessions.count > 1 {
             Menu {
                 ForEach(devices.sessions) { session in
-                    Toggle(session.name, isOn: Binding(
+                    Toggle(isOn: Binding(
                         get: { session.id == devices.selected?.id },
                         set: { if $0 { devices.selectedID = session.id } }
-                    ))
+                    )) {
+                        Label(session.name, systemImage: session.capabilities.formFactor.pairSymbol)
+                    }
                 }
             } label: {
                 HStack(spacing: 4) {
