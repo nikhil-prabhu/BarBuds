@@ -4,3 +4,6 @@ xcuserdata/
 *.xcuserstate
 BarBudsCore/
 core/generated/
+.DS_Store
+build/
+dist/

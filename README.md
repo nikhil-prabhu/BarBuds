@@ -42,7 +42,9 @@ make core                                  # build the Rust core into the BarBud
 open app/BarBuds/BarBuds.xcodeproj         # then Product › Run
 ```
 
-Run `make core` again whenever the Rust code changes. Run the core's tests with `cd core && cargo test`.
+Run `make core` again whenever the Rust code changes.
+
+To build an installable disk image, run `make package`, or `make package CONFIG=Debug` for a build that keeps the Debug menu. The DMG lands in `dist/` with installation instructions inside. These test builds aren't notarized yet, so on first launch macOS asks the tester to allow BarBuds in **System Settings › Privacy & Security › Open Anyway**. Run the core's tests with `cd core && cargo test`.
 
 Debug builds add a **Debug** section to the popover's ⋯ menu that simulates earbuds connecting and disconnecting, so you can work on the UI without hardware.
 

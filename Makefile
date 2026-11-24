@@ -1,4 +1,4 @@
-.PHONY: core clean
+.PHONY: core clean package
 
 core:
 	cd core && cargo swift package --name BarBudsCore --platforms macos
@@ -7,4 +7,8 @@ core:
 
 clean:
 	cd core && cargo clean
-	rm -rf BarBudsCore
+	rm -rf BarBudsCore build dist
+
+# Installable DMG in dist/. CONFIG=Release (default) or Debug.
+package:
+	CONFIG=$(or $(CONFIG),Release) scripts/package.sh
