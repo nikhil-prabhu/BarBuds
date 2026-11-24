@@ -133,6 +133,7 @@ private struct MenuHeader: View {
                     Text(status(of: session))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
             Spacer()
@@ -189,19 +190,24 @@ private struct MenuHeader: View {
                 }
             } label: {
                 HStack(spacing: 4) {
+                    // Long names truncate instead of widening the popover.
                     Text(name)
                         .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .fixedSize()
                 }
             }
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
-            .fixedSize()
         } else {
             Text(name)
                 .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
     }
 
@@ -236,6 +242,13 @@ private struct MenuHeader: View {
     MenuContentView(devices: DeviceManager(previewSessions: [
         .preview(model: .pixelBudsPro, name: "Work Buds", id: "a"),
         .preview(model: .pixelBudsASeries, name: "Gym Buds", id: "b"),
+    ]))
+}
+
+#Preview("Long names") {
+    MenuContentView(devices: DeviceManager(previewSessions: [
+        .preview(model: .pixelBudsASeries, name: "Simulated Pixel Buds A-Series", id: "a"),
+        .preview(model: .pixelBudsPro, name: "Someone's Extremely Long Earbud Name", id: "b"),
     ]))
 }
 
