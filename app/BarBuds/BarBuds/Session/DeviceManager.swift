@@ -50,13 +50,17 @@ extension DeviceManager {
         sessions = previewSessions
     }
 
-    /// Simulates another pair of mock earbuds connecting to the Mac.
-    func simulateConnect() {
+    /// Simulates a pair of `model` earbuds connecting to the Mac. It runs
+    /// the model's real driver against a simulator of its protocol.
+    func simulateConnect(_ model: DeviceModel) {
+        let displayName = BarBudsController(model: model).capabilities().displayName
+        let sameModel = sessions.filter { $0.capabilities.displayName == displayName }.count
+        let name = "Simulated \(displayName)" + (sameModel > 0 ? " \(sameModel + 1)" : "")
         let device = DiscoveredDevice(
             id: "simulated-\(UUID().uuidString)",
-            name: "Mock Buds \(sessions.count + 1)",
-            model: .mock,
-            makeTransport: { MockTransport() }
+            name: name,
+            model: model,
+            makeTransport: { SimulatedTransport(model: model) }
         )
         handle(.connected(device))
         selectedID = device.id

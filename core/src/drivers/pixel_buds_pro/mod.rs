@@ -23,8 +23,7 @@ mod fixtures;
 mod hdlc;
 mod proto;
 mod rpc;
-#[cfg(test)]
-mod sim;
+pub(crate) mod sim;
 
 use std::collections::VecDeque;
 

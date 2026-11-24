@@ -14,6 +14,27 @@ mod device;
 
 pub use device::MockEarbuds;
 
+/// [`MockEarbuds`] behind the generic [`crate::simulator::Simulator`] interface.
+pub(crate) struct MockSim {
+    device: std::sync::Arc<MockEarbuds>,
+}
+
+impl Default for MockSim {
+    fn default() -> Self {
+        Self { device: MockEarbuds::new() }
+    }
+}
+
+impl crate::simulator::Simulator for MockSim {
+    fn receive(&mut self, bytes: &[u8]) -> Vec<u8> {
+        self.device.receive(bytes.to_vec())
+    }
+
+    fn tick(&mut self) -> Vec<u8> {
+        self.device.tick()
+    }
+}
+
 use crate::driver::{Decoded, Event, EarbudDriver};
 use crate::error::BarBudsError;
 use crate::model::{

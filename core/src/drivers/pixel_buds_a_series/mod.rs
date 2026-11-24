@@ -28,6 +28,8 @@
 //! Reverse-engineered from Bluetooth HCI captures of the Pixel Buds app on a
 //! Pixel phone changing each setting (2026-11-23).
 
+pub(crate) mod sim;
+
 use prost::Message;
 
 use crate::driver::{Decoded, EarbudDriver, Event};

@@ -11,11 +11,13 @@ mod driver;
 mod drivers;
 mod error;
 mod model;
+mod simulator;
 
 pub use controller::BarBudsController;
 pub use drivers::mock::MockEarbuds;
 pub use error::BarBudsError;
 pub use model::*;
+pub use simulator::DeviceSimulator;
 
 /// Returns the version of the core library.
 #[uniffi::export]

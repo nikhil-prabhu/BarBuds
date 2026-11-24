@@ -1,5 +1,6 @@
-//! A simulated pair of Pixel Buds Pro for tests: just enough of the Maestro
-//! server side to exercise the driver end to end.
+//! A simulated pair of Pixel Buds Pro: enough of the Maestro server side to
+//! exercise the driver end to end in tests, and to stand in for real earbuds
+//! in the app's Debug menu (see [`crate::DeviceSimulator`]).
 
 use std::collections::HashMap;
 
@@ -15,9 +16,15 @@ use super::proto::{
 use super::rpc::{self, Method, RpcPacket, packet_type};
 use super::{hdlc, rpc::MAESTRO_SERVICE};
 
-/// pw_rpc's NOT_FOUND, sent for requests on channels the device doesn't serve.
+const STATUS_INVALID_ARGUMENT: u32 = 3;
+/// Sent for requests on channels the device doesn't serve, and unknown settings.
 const STATUS_NOT_FOUND: u32 = 5;
+#[cfg(test)]
 const STATUS_FAILED_PRECONDITION: u32 = 9;
+const STATUS_UNIMPLEMENTED: u32 = 12;
+
+/// The RPC channel the simulated earbuds answer on (the right bud's).
+pub(crate) const DEFAULT_CHANNEL: u32 = 21;
 
 pub(crate) struct PixelBudsSim {
     channel: u32,
@@ -29,6 +36,7 @@ pub(crate) struct PixelBudsSim {
     battery: proto::BatteryInfo,
     runtime_subscribed: bool,
     settings_subscribed: bool,
+    #[cfg(test)]
     reject_writes: bool,
 }
 
@@ -64,22 +72,27 @@ impl PixelBudsSim {
             },
             runtime_subscribed: false,
             settings_subscribed: false,
+            #[cfg(test)]
             reject_writes: false,
         }
     }
 
+    #[cfg(test)]
     pub fn subscriptions(&self) -> (bool, bool) {
         (self.runtime_subscribed, self.settings_subscribed)
     }
 
+    #[cfg(test)]
     pub fn anc(&self) -> i32 {
         self.anc
     }
 
+    #[cfg(test)]
     pub fn eq(&self) -> [f32; 5] {
         self.eq.gains()
     }
 
+    #[cfg(test)]
     pub fn reject_writes(&mut self) {
         self.reject_writes = true;
     }
@@ -91,20 +104,40 @@ impl PixelBudsSim {
         let mut offset = 0;
         while let Some((consumed, frame)) = hdlc::decode(&self.rx[offset..]) {
             offset += consumed;
-            if let Ok(Some(frame)) = frame {
-                packets.push(rpc::decode_packet(&frame).expect("driver sends valid packets"));
+            // Like real firmware, ignore anything that doesn't decode.
+            if let Ok(Some(frame)) = frame
+                && let Ok(packet) = rpc::decode_packet(&frame)
+            {
+                packets.push(packet);
             }
         }
         self.rx.drain(..offset);
         packets.into_iter().flat_map(|p| self.handle(p)).collect()
     }
 
+    /// Simulate time passing: each bud not charging loses 1% battery. Returns
+    /// the runtime-info update the earbuds stream, if the host subscribed.
+    pub fn tick(&mut self) -> Vec<u8> {
+        for bud in [&mut self.battery.left, &mut self.battery.right]
+            .into_iter()
+            .flatten()
+        {
+            if bud.state != battery_state::CHARGING {
+                bud.level = (bud.level - 1).max(0);
+            }
+        }
+        if !self.runtime_subscribed {
+            return vec![];
+        }
+        self.stream_packet(Method::SubscribeRuntimeInfo, self.runtime_info())
+    }
+
+    /// Answers one request. Never panics: the app's Debug menu runs this
+    /// simulator, so malformed input gets an RPC error, as from real earbuds.
     fn handle(&mut self, request: RpcPacket) -> Vec<u8> {
-        assert_eq!(
-            request.packet_type,
-            packet_type::REQUEST,
-            "host sends only requests"
-        );
+        if request.packet_type != packet_type::REQUEST {
+            return vec![]; // E.g. a client error cancelling a call.
+        }
         let reply = |packet_type: i32, status: u32, payload: Vec<u8>| {
             rpc::encode_packet(&RpcPacket {
                 packet_type,
@@ -117,7 +150,18 @@ impl PixelBudsSim {
             return reply(packet_type::SERVER_ERROR, STATUS_NOT_FOUND, vec![]);
         }
 
-        match Method::from_packet(&request).expect("driver calls known methods") {
+        let error = |status: u32| {
+            rpc::encode_packet(&RpcPacket {
+                packet_type: packet_type::SERVER_ERROR,
+                status,
+                payload: vec![],
+                ..request.clone()
+            })
+        };
+        let Some(method) = Method::from_packet(&request) else {
+            return error(STATUS_UNIMPLEMENTED);
+        };
+        match method {
             Method::GetSoftwareInfo => reply(packet_type::RESPONSE, 0, software_info()),
             Method::GetHardwareInfo => reply(packet_type::RESPONSE, 0, hardware_info()),
             Method::SubscribeRuntimeInfo => {
@@ -129,33 +173,45 @@ impl PixelBudsSim {
                 vec![]
             }
             Method::ReadSetting => {
-                let msg = proto::ReadSettingMsg::decode(request.payload.as_slice()).unwrap();
+                let Ok(msg) = proto::ReadSettingMsg::decode(request.payload.as_slice()) else {
+                    return error(STATUS_INVALID_ARGUMENT);
+                };
                 let setting = match msg.settings_id {
                     Some(setting_id::CURRENT_ANCR_STATE) => Setting::CurrentAncrState(self.anc),
                     Some(setting_id::CURRENT_USER_EQ) => Setting::CurrentUserEq(self.eq),
-                    Some(id) if self.bools.contains_key(&id) => {
-                        Setting::from_bool(id, self.bools[&id]).unwrap()
-                    }
-                    other => panic!("unexpected read of setting {other:?}"),
+                    Some(id) => match self
+                        .bools
+                        .get(&id)
+                        .and_then(|&on| Setting::from_bool(id, on))
+                    {
+                        Some(setting) => setting,
+                        None => return error(STATUS_NOT_FOUND),
+                    },
+                    None => return error(STATUS_INVALID_ARGUMENT),
                 };
                 reply(packet_type::RESPONSE, 0, settings_rsp(setting))
             }
             Method::WriteSetting => {
+                #[cfg(test)]
                 if self.reject_writes {
                     return reply(packet_type::RESPONSE, STATUS_FAILED_PRECONDITION, vec![]);
                 }
-                let msg = proto::WriteSettingMsg::decode(request.payload.as_slice()).unwrap();
-                let setting = msg
-                    .setting
-                    .and_then(|s| s.value)
-                    .expect("write carries a setting");
+                let setting = proto::WriteSettingMsg::decode(request.payload.as_slice())
+                    .ok()
+                    .and_then(|msg| msg.setting)
+                    .and_then(|s| s.value);
+                let Some(setting) = setting else {
+                    return error(STATUS_INVALID_ARGUMENT);
+                };
                 match setting {
                     Setting::CurrentAncrState(state) => self.anc = state,
                     Setting::CurrentUserEq(bands) => self.eq = bands,
-                    ref other => {
-                        let (id, on) = other.as_bool().unwrap();
-                        self.bools.insert(id, on);
-                    }
+                    ref other => match other.as_bool() {
+                        Some((id, on)) => {
+                            self.bools.insert(id, on);
+                        }
+                        None => return error(STATUS_INVALID_ARGUMENT),
+                    },
                 }
                 let mut out = reply(packet_type::RESPONSE, 0, vec![]);
                 out.extend(self.settings_changed(setting));
@@ -191,6 +247,7 @@ impl PixelBudsSim {
     }
 
     /// The ANC mode changes on the earbuds themselves (e.g. a long press).
+    #[cfg(test)]
     pub fn external_anc_change(&mut self, state: i32) -> Vec<u8> {
         if state != 4 {
             self.anc = state;
@@ -199,12 +256,14 @@ impl PixelBudsSim {
     }
 
     /// Another device (e.g. the user's phone) changes the EQ.
+    #[cfg(test)]
     pub fn external_eq_change(&mut self, gains: [f32; 5]) -> Vec<u8> {
         self.eq = proto::EqBands::from_gains(gains);
         self.settings_changed(Setting::CurrentUserEq(self.eq))
     }
 
     /// Both buds report `level`; the case reports `case` (`None`: not reporting).
+    #[cfg(test)]
     pub fn battery_update(&mut self, level: i32, case: Option<i32>) -> Vec<u8> {
         self.battery = proto::BatteryInfo {
             left: battery(level, false),
@@ -252,4 +311,14 @@ fn hardware_info() -> Vec<u8> {
         }),
     }
     .encode_to_vec()
+}
+
+impl crate::simulator::Simulator for PixelBudsSim {
+    fn receive(&mut self, bytes: &[u8]) -> Vec<u8> {
+        PixelBudsSim::receive(self, bytes)
+    }
+
+    fn tick(&mut self) -> Vec<u8> {
+        PixelBudsSim::tick(self)
+    }
 }

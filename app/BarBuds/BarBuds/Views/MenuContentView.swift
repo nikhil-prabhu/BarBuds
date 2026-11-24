@@ -139,7 +139,13 @@ private struct MenuHeader: View {
             Menu {
                 #if DEBUG
                 Section("Debug") {
-                    Button("Simulate Device Connecting", action: devices.simulateConnect)
+                    Menu("Simulate Device Connecting") {
+                        ForEach(supportedModels(), id: \.self) { model in
+                            Button(BarBudsController(model: model).capabilities().displayName) {
+                                devices.simulateConnect(model)
+                            }
+                        }
+                    }
                     Button("Simulate Device Disconnecting", action: devices.simulateDisconnect)
                         .disabled(devices.selected == nil)
                 }
@@ -218,10 +224,18 @@ private struct MenuHeader: View {
     MenuContentView(devices: DeviceManager(previewSessions: [.preview()]))
 }
 
+#Preview("Pixel Buds Pro") {
+    MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .pixelBudsPro)]))
+}
+
+#Preview("Pixel Buds A-Series") {
+    MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .pixelBudsASeries)]))
+}
+
 #Preview("Two devices") {
     MenuContentView(devices: DeviceManager(previewSessions: [
-        .preview(name: "Mock Buds", id: "a"),
-        .preview(name: "Office Buds", id: "b"),
+        .preview(model: .pixelBudsPro, name: "Work Buds", id: "a"),
+        .preview(model: .pixelBudsASeries, name: "Gym Buds", id: "b"),
     ]))
 }
 

@@ -1,13 +1,14 @@
 import BarBudsCore
 import Foundation
 
-/// Stands in for a Bluetooth channel by routing bytes through the Rust
-/// `MockEarbuds` simulator, with a little latency so the UI behaves as it
-/// would with real hardware (settings change only once the device confirms).
-actor MockTransport: EarbudsTransport {
+/// Stands in for a Bluetooth channel by routing bytes through a Rust
+/// `DeviceSimulator`, which speaks the chosen model's real protocol, with a
+/// little latency so the UI behaves as it would with real hardware (settings
+/// change only once the device confirms).
+actor SimulatedTransport: EarbudsTransport {
     nonisolated let incoming: AsyncStream<Data>
     private let continuation: AsyncStream<Data>.Continuation
-    private let device: MockEarbuds
+    private let device: DeviceSimulator
     private let latency: Duration
     private let tickInterval: Duration
     private var ticker: Task<Void, Never>?
@@ -16,12 +17,12 @@ actor MockTransport: EarbudsTransport {
     ///   - latency: Delay before the simulated device replies.
     ///   - tickInterval: How often the simulated buds drain 1% battery and report it.
     init(
-        device: MockEarbuds = MockEarbuds(),
+        model: DeviceModel,
         latency: Duration = .milliseconds(40),
         tickInterval: Duration = .seconds(20)
     ) {
         (incoming, continuation) = AsyncStream.makeStream(of: Data.self)
-        self.device = device
+        self.device = DeviceSimulator(model: model)
         self.latency = latency
         self.tickInterval = tickInterval
     }

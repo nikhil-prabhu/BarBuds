@@ -178,18 +178,29 @@ final class EarbudsSession: Identifiable {
 
 #if DEBUG
 extension EarbudsSession {
-    /// A session already filled in from the simulated earbuds, for static
+    /// A session already filled in from a simulated `model`, for static
     /// previews. It has no transport, so changing settings does nothing.
     static func preview(
-        name: String = "Mock Buds",
+        model: DeviceModel = .mock,
+        name: String? = nil,
         id: String = "preview",
         info: DeviceInfo? = nil
     ) -> EarbudsSession {
+        let displayName = BarBudsController(model: model).capabilities().displayName
         let session = EarbudsSession(device: DiscoveredDevice(
-            id: id, name: name, model: .mock, makeTransport: { MockTransport() }
+            id: id,
+            name: name ?? displayName,
+            model: model,
+            makeTransport: { SimulatedTransport(model: model) }
         ))
-        let reply = MockEarbuds().receive(bytes: session.controller.start())
-        session.state = (try? session.controller.feed(bytes: reply)) ?? session.controller.state()
+        // Run the handshake synchronously: some protocols take several round trips.
+        let simulator = DeviceSimulator(model: model)
+        var outbound = session.controller.start()
+        while !outbound.isEmpty {
+            _ = try? session.controller.feed(bytes: simulator.receive(bytes: outbound))
+            outbound = session.controller.takeOutbound()
+        }
+        session.state = session.controller.state()
         if let info {
             session.state.info = info
         }

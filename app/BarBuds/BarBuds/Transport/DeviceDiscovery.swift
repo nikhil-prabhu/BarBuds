@@ -35,7 +35,7 @@ nonisolated struct MockDiscovery: DeviceDiscovery {
                     id: "mock-\(index)",
                     name: name,
                     model: .mock,
-                    makeTransport: { MockTransport() }
+                    makeTransport: { SimulatedTransport(model: .mock) }
                 )))
             }
             // Leave the stream open: a real source keeps reporting changes.

@@ -116,7 +116,6 @@ pub(crate) struct DeviceBatteryInfo {
 
 pub(crate) mod battery_state {
     pub const UNKNOWN: i32 = 0;
-    #[cfg_attr(not(test), allow(dead_code))] // The driver treats any other known state as not charging.
     pub const NOT_CHARGING: i32 = 1;
     pub const CHARGING: i32 = 2;
 }

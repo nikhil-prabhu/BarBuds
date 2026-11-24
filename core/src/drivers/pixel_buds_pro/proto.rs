@@ -6,7 +6,6 @@
 use prost::{Message, Oneof};
 
 pub(crate) use crate::drivers::google::RuntimeInfo;
-#[cfg(test)]
 pub(crate) use crate::drivers::google::{BatteryInfo, DeviceBatteryInfo, battery_state};
 
 /// `AllegroSettingType`: which setting `ReadSetting` should return.

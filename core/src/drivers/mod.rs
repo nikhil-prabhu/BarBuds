@@ -7,6 +7,7 @@ mod pixel_buds_pro;
 
 use crate::driver::EarbudDriver;
 use crate::model::DeviceModel;
+use crate::simulator::Simulator;
 
 /// The RFCOMM service UUID a model's control channel is advertised under.
 pub(crate) fn rfcomm_service_uuid(model: DeviceModel) -> Option<&'static str> {
@@ -14,6 +15,17 @@ pub(crate) fn rfcomm_service_uuid(model: DeviceModel) -> Option<&'static str> {
         DeviceModel::Mock => None,
         DeviceModel::PixelBudsPro => Some(pixel_buds_pro::SERVICE_UUID),
         DeviceModel::PixelBudsASeries => Some(pixel_buds_a_series::SERVICE_UUID),
+    }
+}
+
+/// A simulated device speaking `model`'s protocol, for the app's Debug menu.
+pub(crate) fn simulator_for(model: DeviceModel) -> Box<dyn Simulator> {
+    match model {
+        DeviceModel::Mock => Box::new(mock::MockSim::default()),
+        DeviceModel::PixelBudsPro => {
+            Box::new(pixel_buds_pro::sim::PixelBudsSim::new(pixel_buds_pro::sim::DEFAULT_CHANNEL))
+        }
+        DeviceModel::PixelBudsASeries => Box::<pixel_buds_a_series::sim::ASeriesSim>::default(),
     }
 }
 
