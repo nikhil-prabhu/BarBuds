@@ -21,7 +21,7 @@ More models are planned. See [Adding a device](#adding-a-device).
 
 ## Requirements
 
-- macOS 27 or later
+- macOS 26 or later
 - Earbuds paired with the Mac over Bluetooth. BarBuds asks for Bluetooth access the first time it runs.
 
 There are no prebuilt releases yet. Signed builds via GitHub Releases and Homebrew are planned. For now, build from source.
