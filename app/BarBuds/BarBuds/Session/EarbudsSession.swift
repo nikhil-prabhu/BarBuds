@@ -20,6 +20,8 @@ final class EarbudsSession: Identifiable {
     /// Last state the device confirmed.
     private(set) var state: DeviceState
     private(set) var lastError: String?
+    /// Rings the buds to find them; `nil` for models that can't be rung.
+    let find: FindSession?
     /// A custom EQ curve being edited that the device hasn't confirmed yet, so
     /// sliders track the pointer instead of waiting on a round trip.
     private var eqDraft: EqSettings?
@@ -40,6 +42,7 @@ final class EarbudsSession: Identifiable {
         capabilities = controller.capabilities()
         state = controller.state()
         makeTransport = device.makeTransport
+        find = capabilities.canRing ? device.makeFindTransport.map(FindSession.init) : nil
     }
 
     /// The EQ to display: the in-progress edit if there is one, else the confirmed state.
@@ -78,6 +81,7 @@ final class EarbudsSession: Identifiable {
     }
 
     func disconnect() async {
+        await find?.close()
         guard let transport else { return }
         tearDown()
         await transport.close()
@@ -191,7 +195,8 @@ extension EarbudsSession {
             id: id,
             name: name ?? displayName,
             model: model,
-            makeTransport: { SimulatedTransport(model: model) }
+            makeTransport: { SimulatedTransport(model: model) },
+            makeFindTransport: { SimulatedTransport.find() }
         ))
         // Run the handshake synchronously: some protocols take several round trips.
         let simulator = DeviceSimulator(model: model)

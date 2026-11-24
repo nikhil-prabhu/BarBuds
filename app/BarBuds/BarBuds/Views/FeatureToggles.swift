@@ -11,39 +11,11 @@ struct FeatureToggles: View {
     let onSet: (FeatureToggle, Bool) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
-            if isExpanded {
-                ForEach(toggles, id: \.self) { toggle in
-                    row(toggle)
-                }
+        CollapsibleSection(title: "Settings", summary: summary, isExpanded: $isExpanded) {
+            ForEach(toggles, id: \.self) { toggle in
+                row(toggle)
             }
         }
-    }
-
-    private var header: some View {
-        Button {
-            isExpanded.toggle()
-        } label: {
-            HStack {
-                Text("Settings")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                if !isExpanded {
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Settings")
-        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-        .accessibilityHint("Shows or hides \(summary)")
     }
 
     /// E.g. "3 of 6 on".

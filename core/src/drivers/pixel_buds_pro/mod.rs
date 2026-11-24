@@ -303,6 +303,7 @@ impl EarbudDriver for PixelBudsProDriver {
             has_charging_case: true,
             form_factor: FormFactor::Stemless,
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
+            can_ring: true,
         }
     }
 

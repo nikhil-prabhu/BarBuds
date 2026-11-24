@@ -10,12 +10,14 @@ mod controller;
 mod driver;
 mod drivers;
 mod error;
+mod fast_pair;
 mod model;
 mod simulator;
 
 pub use controller::BarBudsController;
 pub use drivers::mock::MockEarbuds;
 pub use error::BarBudsError;
+pub use fast_pair::{FindController, FindSimulator, RingState};
 pub use model::*;
 pub use simulator::DeviceSimulator;
 

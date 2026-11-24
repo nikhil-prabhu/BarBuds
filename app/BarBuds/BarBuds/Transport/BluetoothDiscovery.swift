@@ -76,13 +76,21 @@ private final class BluetoothMonitor: NSObject {
             forDisconnectNotification: self,
             selector: #selector(deviceDisconnected(_:device:))
         )
-        let name = device.name ?? BarBudsController(model: model).capabilities().displayName
+        let capabilities = BarBudsController(model: model).capabilities()
+        let name = device.name ?? capabilities.displayName
+        // Ringing goes over the Fast Pair message stream, a second channel.
+        var makeFindTransport: (@Sendable () -> any EarbudsTransport)?
+        if capabilities.canRing {
+            let fastPairUUID = fastPairServiceUuid()
+            makeFindTransport = { RFCOMMTransport(address: id, serviceUUID: fastPairUUID) }
+        }
         Self.log.info("Found \(name, privacy: .public) (\(String(describing: model), privacy: .public))")
         continuation.yield(.connected(DiscoveredDevice(
             id: id,
             name: name,
             model: model,
-            makeTransport: { RFCOMMTransport(address: id, serviceUUID: serviceUUID) }
+            makeTransport: { RFCOMMTransport(address: id, serviceUUID: serviceUUID) },
+            makeFindTransport: makeFindTransport
         )))
     }
 

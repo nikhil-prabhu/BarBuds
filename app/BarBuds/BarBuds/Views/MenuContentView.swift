@@ -18,6 +18,13 @@ struct MenuContentView: View {
         }
         .padding(16)
         .frame(width: 300)
+        // Ringing buds keep their channel open after the popover closes;
+        // anything else can let go of it.
+        .onDisappear {
+            for session in devices.sessions {
+                Task { await session.find?.closeIfIdle() }
+            }
+        }
     }
 
     private var noDevices: some View {
@@ -42,6 +49,7 @@ private struct DeviceControls: View {
     let session: EarbudsSession
     /// Shared by every device and remembered across launches.
     @AppStorage("settingsExpanded") private var settingsExpanded = false
+    @AppStorage("findExpanded") private var findExpanded = false
 
     var body: some View {
         switch session.connection {
@@ -104,6 +112,11 @@ private struct DeviceControls: View {
                 isExpanded: $settingsExpanded,
                 onSet: { session.setToggle($0, on: $1) }
             )
+        }
+
+        if let find = session.find {
+            Divider()
+            FindControl(find: find, formFactor: capabilities.formFactor, isExpanded: $findExpanded)
         }
 
         if let error = session.lastError {

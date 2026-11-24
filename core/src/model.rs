@@ -103,6 +103,9 @@ pub struct DeviceCapabilities {
     pub form_factor: FormFactor,
     /// On/off features the device supports, in display order.
     pub toggles: Vec<FeatureToggle>,
+    /// Each bud can be rung to find it, via the Fast Pair message stream
+    /// (see [`crate::FindController`]).
+    pub can_ring: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]

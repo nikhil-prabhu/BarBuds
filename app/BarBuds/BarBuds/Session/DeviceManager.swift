@@ -60,7 +60,8 @@ extension DeviceManager {
             id: "simulated-\(UUID().uuidString)",
             name: name,
             model: model,
-            makeTransport: { SimulatedTransport(model: model) }
+            makeTransport: { SimulatedTransport(model: model) },
+            makeFindTransport: { SimulatedTransport.find() }
         )
         handle(.connected(device))
         selectedID = device.id

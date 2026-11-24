@@ -10,6 +10,9 @@ nonisolated struct DiscoveredDevice: Identifiable, Sendable {
     let model: DeviceModel
     /// Opens a fresh control channel to this device.
     let makeTransport: @Sendable () -> any EarbudsTransport
+    /// Opens the Fast Pair channel used to ring the buds, for models whose
+    /// capabilities say `canRing`. `nil` when the device can't be rung.
+    var makeFindTransport: (@Sendable () -> any EarbudsTransport)? = nil
 }
 
 nonisolated enum DiscoveryEvent: Sendable {
@@ -35,7 +38,8 @@ nonisolated struct MockDiscovery: DeviceDiscovery {
                     id: "mock-\(index)",
                     name: name,
                     model: .mock,
-                    makeTransport: { SimulatedTransport(model: .mock) }
+                    makeTransport: { SimulatedTransport(model: .mock) },
+                    makeFindTransport: { SimulatedTransport.find() }
                 )))
             }
             // Leave the stream open: a real source keeps reporting changes.
