@@ -21,6 +21,20 @@ pub enum AncMode {
     Transparency,
 }
 
+/// The general shape of a model's earbuds. Generic on purpose: the UI draws a
+/// matching unbranded symbol, never a picture of the actual product.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum FormFactor {
+    /// A stem below a hard, open-fit tip.
+    Stemmed,
+    /// A stem below a sealed silicone tip.
+    StemmedInEar,
+    /// A round bud with a silicone tip and no stem.
+    Stemless,
+    /// An open-ear bud held by a hook around the ear.
+    EarHook,
+}
+
 /// An on/off device feature. The UI owns titles and descriptions, so each
 /// variant means the same thing for every vendor that supports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
@@ -85,6 +99,8 @@ pub struct DeviceCapabilities {
     /// `None` when the model has no EQ control.
     pub eq: Option<EqCapabilities>,
     pub has_charging_case: bool,
+    /// The buds' general shape, so the UI can draw a matching icon.
+    pub form_factor: FormFactor,
     /// On/off features the device supports, in display order.
     pub toggles: Vec<FeatureToggle>,
 }

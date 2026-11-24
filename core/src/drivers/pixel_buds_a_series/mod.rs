@@ -35,6 +35,7 @@ use crate::drivers::google::{self, FirmwareVersion, HardwareInfo, RuntimeInfo, S
 use crate::error::BarBudsError;
 use crate::model::{
     AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
+    FormFactor,
 };
 
 /// RFCOMM service UUID of the control channel.
@@ -263,6 +264,7 @@ impl EarbudDriver for PixelBudsASeriesDriver {
                 presets: vec![EqPreset::Custom],
             }),
             has_charging_case: true,
+            form_factor: FormFactor::Stemless,
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
         }
     }

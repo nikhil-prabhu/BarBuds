@@ -33,6 +33,7 @@ use crate::drivers::google::{self, HardwareInfo, SoftwareInfo, battery_status};
 use crate::error::BarBudsError;
 use crate::model::{
     AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
+    FormFactor,
 };
 use prost::Message;
 use proto::{Setting, anc_state, bool_setting, setting_id};
@@ -301,6 +302,7 @@ impl EarbudDriver for PixelBudsProDriver {
                 presets: PRESETS.to_vec(),
             }),
             has_charging_case: true,
+            form_factor: FormFactor::Stemless,
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
         }
     }

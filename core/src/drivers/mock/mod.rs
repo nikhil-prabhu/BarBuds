@@ -16,7 +16,9 @@ pub use device::MockEarbuds;
 
 use crate::driver::{Decoded, Event, EarbudDriver};
 use crate::error::BarBudsError;
-use crate::model::{AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqUnit, EqSettings, FeatureToggle};
+use crate::model::{
+    AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle, FormFactor,
+};
 use codec::frame_type;
 
 pub(crate) const BAND_COUNT: usize = 5;
@@ -86,6 +88,7 @@ impl EarbudDriver for MockDriver {
                 ],
             }),
             has_charging_case: true,
+            form_factor: FormFactor::Stemmed,
             toggles: codec::TOGGLES.to_vec(),
         }
     }
