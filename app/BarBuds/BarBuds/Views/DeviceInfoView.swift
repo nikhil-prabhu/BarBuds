@@ -184,6 +184,9 @@ private struct InfoRow: View {
     }
 }
 
+// The previews use DEBUG-only helpers (`EarbudsSession.preview`,
+// `DeviceManager(previewSessions:)`), so Release builds skip them.
+#if DEBUG
 #Preview {
     let firmware = "release_5.11_signed"
     DeviceInfoView(devices: DeviceManager(previewSessions: [
@@ -197,3 +200,4 @@ private struct InfoRow: View {
         ),
     ]))
 }
+#endif

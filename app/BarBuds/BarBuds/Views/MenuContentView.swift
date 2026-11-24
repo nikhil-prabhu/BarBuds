@@ -211,6 +211,9 @@ private struct MenuHeader: View {
     }
 }
 
+// The previews use DEBUG-only helpers (`EarbudsSession.preview`,
+// `DeviceManager(previewSessions:)`), so Release builds skip them.
+#if DEBUG
 #Preview("One device") {
     MenuContentView(devices: DeviceManager(previewSessions: [.preview()]))
 }
@@ -225,3 +228,4 @@ private struct MenuHeader: View {
 #Preview("No devices") {
     MenuContentView(devices: DeviceManager(previewSessions: []))
 }
+#endif
