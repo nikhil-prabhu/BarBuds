@@ -38,6 +38,8 @@ pub(crate) struct PixelBudsSim {
     last_saved: proto::EqBands,
     /// Raw `volume_asymmetry` (balance) value.
     volume_asymmetry: i32,
+    /// Touch & hold actions; both buds cycle noise control by default.
+    gesture_control: proto::GestureControl,
     /// Refuse to share the saved curve, as pbpctrl saw on some firmware.
     #[cfg(test)]
     refuse_last_saved: bool,
@@ -77,6 +79,10 @@ impl PixelBudsSim {
             eq: proto::EqBands::from_gains([1.0, 0.5, 0.0, -1.5, 2.0]),
             last_saved: proto::EqBands::from_gains([2.0, 1.0, 0.0, 1.0, 2.0]),
             volume_asymmetry: 0,
+            gesture_control: proto::GestureControl::new(
+                proto::action_target::ANC_CONTROL,
+                proto::action_target::ANC_CONTROL,
+            ),
             #[cfg(test)]
             refuse_last_saved: false,
             battery: proto::BatteryInfo {
@@ -99,6 +105,11 @@ impl PixelBudsSim {
     #[cfg(test)]
     pub fn anc(&self) -> i32 {
         self.anc
+    }
+
+    #[cfg(test)]
+    pub fn hold_targets(&self) -> (i32, i32) {
+        self.gesture_control.targets()
     }
 
     #[cfg(test)]
@@ -206,6 +217,9 @@ impl PixelBudsSim {
                     Some(setting_id::VOLUME_ASYMMETRY) => {
                         Setting::VolumeAsymmetry(self.volume_asymmetry)
                     }
+                    Some(setting_id::GESTURE_CONTROL) => {
+                        Setting::GestureControl(self.gesture_control.clone())
+                    }
                     Some(setting_id::LAST_SAVED_USER_EQ) => {
                         #[cfg(test)]
                         if self.refuse_last_saved {
@@ -249,6 +263,9 @@ impl PixelBudsSim {
                     Setting::CurrentUserEq(bands) => self.eq = bands,
                     Setting::LastSavedUserEq(bands) => self.last_saved = bands,
                     Setting::VolumeAsymmetry(raw) => self.volume_asymmetry = raw,
+                    Setting::GestureControl(ref control) => {
+                        self.gesture_control = control.clone();
+                    }
                     ref other => match other.as_bool() {
                         Some((id, on)) => {
                             self.bools.insert(id, on);

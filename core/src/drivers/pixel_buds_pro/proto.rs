@@ -10,6 +10,8 @@ pub(crate) use crate::drivers::google::{BatteryInfo, DeviceBatteryInfo, battery_
 
 /// `AllegroSettingType`: which setting `ReadSetting` should return.
 pub(crate) mod setting_id {
+    /// Each bud's touch & hold action, see [`super::GestureControl`].
+    pub const GESTURE_CONTROL: i32 = 7;
     pub const CURRENT_ANCR_STATE: i32 = 13;
     pub const CURRENT_USER_EQ: i32 = 16;
     /// Left/right balance, see [`balance_from_wire`].
@@ -32,6 +34,66 @@ pub(crate) mod bool_setting {
     pub const SUM_TO_MONO: i32 = 19;
     /// Conversation Detection.
     pub const SPEECH_DETECTION: i32 = 22;
+}
+
+/// `RegularActionTarget`: what a touch & hold does.
+pub(crate) mod action_target {
+    // 1 is "check notifications", which BarBuds doesn't offer.
+    pub const PREVIOUS_TRACK: i32 = 2;
+    pub const NEXT_TRACK: i32 = 3;
+    pub const PLAY_PAUSE: i32 = 4;
+    /// Cycles the noise-control modes.
+    pub const ANC_CONTROL: i32 = 5;
+    pub const ASSISTANT_QUERY: i32 = 6;
+}
+
+/// `GestureControl`: each bud's touch & hold action. Writes carry both
+/// sides, as pbpctrl sends.
+#[derive(Clone, PartialEq, Message)]
+pub(crate) struct GestureControl {
+    #[prost(message, optional, tag = "1")]
+    pub left: Option<DeviceGestureControl>,
+    #[prost(message, optional, tag = "2")]
+    pub right: Option<DeviceGestureControl>,
+}
+
+/// `DeviceGestureControl`. In the proto, `kind` is the only member of a
+/// oneof, which encodes the same as this optional field.
+#[derive(Clone, PartialEq, Message)]
+pub(crate) struct DeviceGestureControl {
+    #[prost(message, optional, tag = "4")]
+    pub kind: Option<GestureControlType>,
+}
+
+/// `GestureControlType`: an [`action_target`] value.
+#[derive(Clone, PartialEq, Message)]
+pub(crate) struct GestureControlType {
+    #[prost(int32, tag = "1")]
+    pub value: i32,
+}
+
+impl GestureControl {
+    pub fn new(left: i32, right: i32) -> Self {
+        let side = |value| {
+            Some(DeviceGestureControl {
+                kind: Some(GestureControlType { value }),
+            })
+        };
+        Self {
+            left: side(left),
+            right: side(right),
+        }
+    }
+
+    /// The left and right [`action_target`] values; 0 when missing.
+    pub fn targets(&self) -> (i32, i32) {
+        let target = |side: &Option<DeviceGestureControl>| {
+            side.as_ref()
+                .and_then(|s| s.kind.as_ref())
+                .map_or(0, |k| k.value)
+        };
+        (target(&self.left), target(&self.right))
+    }
 }
 
 /// `AncState`, the value of the `current_ancr_state` setting.
@@ -68,7 +130,7 @@ pub(crate) struct SettingsRsp {
 /// decode as `value: None`.
 #[derive(Clone, PartialEq, Message)]
 pub(crate) struct SettingValue {
-    #[prost(oneof = "Setting", tags = "2, 4, 11, 13, 15, 16, 17, 18, 19, 22")]
+    #[prost(oneof = "Setting", tags = "2, 4, 7, 11, 13, 15, 16, 17, 18, 19, 22")]
     pub value: Option<Setting>,
 }
 
@@ -96,6 +158,8 @@ pub(crate) enum Setting {
     VolumeAsymmetry(i32),
     #[prost(message, tag = "18")]
     LastSavedUserEq(EqBands),
+    #[prost(message, tag = "7")]
+    GestureControl(GestureControl),
 }
 
 impl Setting {
@@ -124,7 +188,8 @@ impl Setting {
             Setting::CurrentAncrState(_)
             | Setting::CurrentUserEq(_)
             | Setting::VolumeAsymmetry(_)
-            | Setting::LastSavedUserEq(_) => return None,
+            | Setting::LastSavedUserEq(_)
+            | Setting::GestureControl(_) => return None,
         })
     }
 }

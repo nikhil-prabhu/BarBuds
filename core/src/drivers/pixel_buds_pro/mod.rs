@@ -31,11 +31,12 @@ use crate::driver::{Decoded, EarbudDriver, Event};
 use crate::drivers::google::{self, HardwareInfo, SoftwareInfo, battery_status};
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
-    FormFactor,
+    AncMode, BudSide, ControlAction, ControlCapabilities, ControlGesture, ControlInput,
+    ControlSetting, ControlSlot, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit,
+    FeatureToggle, FormFactor,
 };
 use prost::Message;
-use proto::{Setting, anc_state, bool_setting, setting_id};
+use proto::{Setting, action_target, anc_state, bool_setting, setting_id};
 
 /// The on/off features shown, in display order, with their Maestro setting
 /// IDs from pbpctrl. Volume EQ and in-ear detection are verified on hardware.
@@ -114,6 +115,44 @@ pub(crate) struct PixelBudsProDriver {
     current_eq: Option<[f32; 5]>,
     /// The user's saved custom curve ("Last Saved"), once reported.
     last_saved: Option<[f32; 5]>,
+    /// Each bud's touch & hold [`action_target`], left and right, once
+    /// reported. Writes carry both, so changing one keeps the other.
+    hold_targets: Option<(i32, i32)>,
+}
+
+/// The touch & hold actions the Pixel Buds app offers (and pbpctrl sets).
+const HOLD_ACTIONS: [(ControlAction, i32); 2] = [
+    (ControlAction::NoiseControl, action_target::ANC_CONTROL),
+    (
+        ControlAction::VoiceAssistant,
+        action_target::ASSISTANT_QUERY,
+    ),
+];
+
+/// The action for an [`action_target`] value, including ones only other
+/// firmware or apps set.
+fn hold_action(target: i32) -> Option<ControlAction> {
+    Some(match target {
+        action_target::ANC_CONTROL => ControlAction::NoiseControl,
+        action_target::ASSISTANT_QUERY => ControlAction::VoiceAssistant,
+        action_target::PLAY_PAUSE => ControlAction::PlayPause,
+        action_target::NEXT_TRACK => ControlAction::SkipForward,
+        action_target::PREVIOUS_TRACK => ControlAction::SkipBack,
+        _ => return None, // Unknown, or "check notifications".
+    })
+}
+
+fn hold_settings((left, right): (i32, i32)) -> Vec<ControlSetting> {
+    [(BudSide::Left, left), (BudSide::Right, right)]
+        .into_iter()
+        .filter_map(|(side, target)| {
+            Some(ControlSetting {
+                side,
+                gesture: ControlGesture::Hold,
+                action: hold_action(target)?,
+            })
+        })
+        .collect()
 }
 
 impl PixelBudsProDriver {
@@ -163,6 +202,7 @@ impl PixelBudsProDriver {
                         setting_id::CURRENT_USER_EQ,
                         setting_id::LAST_SAVED_USER_EQ,
                         setting_id::VOLUME_ASYMMETRY,
+                        setting_id::GESTURE_CONTROL,
                     ]
                     .into();
                     self.pending_reads.extend(TOGGLES.iter().map(|&(_, id)| id));
@@ -228,6 +268,21 @@ impl PixelBudsProDriver {
                 if !ok {
                     return Err(failed("changing a setting"));
                 }
+                if let (Some(Event::Controls(settings)), Some(targets)) =
+                    (&confirmed, &mut self.hold_targets)
+                {
+                    for setting in settings {
+                        let target = HOLD_ACTIONS
+                            .iter()
+                            .find(|&&(a, _)| a == setting.action)
+                            .map(|&(_, t)| t);
+                        match (setting.side, target) {
+                            (BudSide::Left, Some(t)) => targets.0 = t,
+                            (BudSide::Right, Some(t)) => targets.1 = t,
+                            _ => {}
+                        }
+                    }
+                }
                 Ok(confirmed)
             }
             _ if packet.packet_type == packet_type::SERVER_ERROR => {
@@ -248,6 +303,12 @@ impl PixelBudsProDriver {
             }
             Some(Setting::VolumeAsymmetry(raw)) => {
                 Ok(Some(Event::Balance(proto::balance_from_wire(raw))))
+            }
+            Some(Setting::GestureControl(control)) => {
+                let targets = control.targets();
+                self.hold_targets = Some(targets);
+                let settings = hold_settings(targets);
+                Ok((!settings.is_empty()).then_some(Event::Controls(settings)))
             }
             Some(Setting::LastSavedUserEq(bands)) => {
                 self.last_saved = Some(bands.gains());
@@ -355,7 +416,18 @@ impl EarbudDriver for PixelBudsProDriver {
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
             can_ring: true,
             has_balance: true,
-            controls: None,
+            controls: Some(ControlCapabilities {
+                // The Pixel Buds app says "Press & hold".
+                input: ControlInput::Press,
+                slots: [BudSide::Left, BudSide::Right]
+                    .into_iter()
+                    .map(|side| ControlSlot {
+                        side,
+                        gesture: ControlGesture::Hold,
+                        actions: HOLD_ACTIONS.iter().map(|&(a, _)| a).collect(),
+                    })
+                    .collect(),
+            }),
         }
     }
 
@@ -397,6 +469,27 @@ impl EarbudDriver for PixelBudsProDriver {
                 feature: format!("{toggle:?}"),
             })?;
         self.write(setting, Event::Toggle(toggle, on))
+    }
+
+    fn encode_control(&mut self, setting: ControlSetting) -> Result<Vec<u8>, BarBudsError> {
+        let (left, right) = self.hold_targets.ok_or_else(|| {
+            BarBudsError::device("the earbuds haven't reported their gestures yet")
+        })?;
+        let target = HOLD_ACTIONS
+            .iter()
+            .find(|&&(a, _)| a == setting.action)
+            .map(|&(_, t)| t)
+            .ok_or_else(|| BarBudsError::Unsupported {
+                feature: format!("{setting:?}"),
+            })?;
+        let control = match setting.side {
+            BudSide::Left => proto::GestureControl::new(target, right),
+            BudSide::Right => proto::GestureControl::new(left, target),
+        };
+        self.write(
+            Setting::GestureControl(control),
+            Event::Controls(vec![setting]),
+        )
     }
 
     fn encode_balance(&mut self, balance: i32) -> Result<Vec<u8>, BarBudsError> {
@@ -679,6 +772,66 @@ mod tests {
             controller.encode_balance(101),
             Err(BarBudsError::InvalidArgument { .. })
         ));
+    }
+
+    #[test]
+    fn touch_and_hold_reads_and_writes_one_side() {
+        use crate::model::{BudSide, ControlAction, ControlGesture, ControlSetting};
+        let (controller, mut sim) = connected();
+        let hold = |side, action| ControlSetting {
+            side,
+            gesture: ControlGesture::Hold,
+            action,
+        };
+        let state = controller.state();
+        assert!(
+            state
+                .controls
+                .contains(&hold(BudSide::Left, ControlAction::NoiseControl))
+        );
+        assert!(
+            state
+                .controls
+                .contains(&hold(BudSide::Right, ControlAction::NoiseControl))
+        );
+
+        let assistant = hold(BudSide::Left, ControlAction::VoiceAssistant);
+        let frame = controller.encode_control(assistant).unwrap();
+        assert!(
+            !controller.state().controls.contains(&assistant),
+            "waits for the device"
+        );
+        exchange(&controller, &mut sim, frame);
+        assert!(controller.state().controls.contains(&assistant));
+        // Both sides are written; the right one is kept.
+        assert_eq!(
+            sim.hold_targets(),
+            (action_target::ASSISTANT_QUERY, action_target::ANC_CONTROL)
+        );
+
+        // Only the Pixel Buds app's two actions are offered.
+        assert!(
+            controller
+                .encode_control(hold(BudSide::Right, ControlAction::PlayPause))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn gesture_control_wire_format() {
+        // pbpctrl's layout: left = 1, right = 2, each { type = 4 { value = 1 } }.
+        let control =
+            proto::GestureControl::new(action_target::ASSISTANT_QUERY, action_target::ANC_CONTROL);
+        assert_eq!(
+            control.encode_to_vec(),
+            [
+                0x0a, 0x04, 0x22, 0x02, 0x08, 0x06, 0x12, 0x04, 0x22, 0x02, 0x08, 0x05
+            ]
+        );
+        // Actions BarBuds can't name (e.g. "check notifications") are skipped.
+        let settings = hold_settings((1, action_target::ASSISTANT_QUERY));
+        assert_eq!(settings.len(), 1);
+        assert_eq!(settings[0].side, crate::model::BudSide::Right);
     }
 
     #[test]
