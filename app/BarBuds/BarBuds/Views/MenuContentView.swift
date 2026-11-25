@@ -18,6 +18,8 @@ struct MenuContentView: View {
         }
         .padding(16)
         .frame(width: 300)
+        // The login item may have been changed in System Settings meanwhile.
+        .onAppear { LaunchAtLogin.shared.refresh() }
         // Ringing buds keep their channel open after the popover closes;
         // anything else can let go of it.
         .onDisappear {
@@ -155,6 +157,7 @@ private struct DeviceControls: View {
 private struct MenuHeader: View {
     let devices: DeviceManager
     @Environment(\.openWindow) private var openWindow
+    private let launchAtLogin = LaunchAtLogin.shared
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -198,6 +201,11 @@ private struct MenuHeader: View {
                     NSApp.activate()
                     openWindow(id: "about")
                 }
+                Divider()
+                Toggle("Open at Login", isOn: Binding(
+                    get: { launchAtLogin.isEnabled },
+                    set: { launchAtLogin.setEnabled($0) }
+                ))
                 Divider()
                 Button("Quit BarBuds") {
                     NSApplication.shared.terminate(nil)
