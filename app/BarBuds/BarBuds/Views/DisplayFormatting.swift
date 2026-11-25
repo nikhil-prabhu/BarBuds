@@ -67,6 +67,7 @@ extension FeatureToggle {
         case .multipoint: "Multipoint"
         case .monoAudio: "Mono Audio"
         case .touchControls: "Touch Controls"
+        case .lowLatency: "Low Latency Mode"
         }
     }
 
@@ -79,6 +80,7 @@ extension FeatureToggle {
         case .multipoint: "Stay connected to two devices at once"
         case .monoAudio: "Play the same audio in both earbuds"
         case .touchControls: "Tap and swipe on the earbuds"
+        case .lowLatency: "Reduce audio delay for games and video"
         }
     }
 }

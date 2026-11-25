@@ -261,6 +261,10 @@ private struct MenuHeader: View {
     MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .pixelBudsASeries)]))
 }
 
+#Preview("Nothing Ear (open)") {
+    MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .nothingEarOpen)]))
+}
+
 #Preview("Two devices") {
     MenuContentView(devices: DeviceManager(previewSessions: [
         .preview(model: .pixelBudsPro, name: "Work Buds", id: "a"),

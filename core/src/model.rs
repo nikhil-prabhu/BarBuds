@@ -12,6 +12,8 @@ pub enum DeviceModel {
     PixelBudsPro,
     /// Google Pixel Buds A-Series.
     PixelBudsASeries,
+    /// Nothing Ear (open), via the Nothing X control protocol.
+    NothingEarOpen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
@@ -53,6 +55,8 @@ pub enum FeatureToggle {
     MonoAudio,
     /// Tap and swipe gestures on the buds.
     TouchControls,
+    /// Reduce audio delay, e.g. for games and video (Nothing's "Low Lag Mode").
+    LowLatency,
 }
 
 /// An EQ preset a model offers, as its vendor's app names it.
