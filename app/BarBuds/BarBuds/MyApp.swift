@@ -9,7 +9,7 @@ import SwiftUI
         ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
 
     @State private var devices = DeviceManager(
-        discovery: isRunningForPreviews ? MockDiscovery(names: []) as any DeviceDiscovery : BluetoothDiscovery()
+        discovery: isRunningForPreviews ? NoDiscovery() as any DeviceDiscovery : BluetoothDiscovery()
     )
 
     var body: some Scene {

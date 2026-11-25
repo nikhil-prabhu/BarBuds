@@ -46,7 +46,7 @@ final class DeviceManager {
 extension DeviceManager {
     /// A manager showing the given sessions, for previews. Runs no discovery.
     convenience init(previewSessions: [EarbudsSession]) {
-        self.init(discovery: MockDiscovery(names: []))
+        self.init(discovery: NoDiscovery())
         sessions = previewSessions
     }
 

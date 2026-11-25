@@ -6,8 +6,6 @@ use std::collections::HashMap;
 /// A supported earbud model. Each variant maps to one driver in `drivers/`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum DeviceModel {
-    /// Simulated earbuds speaking a made-up protocol, for UI development.
-    Mock,
     /// Google Pixel Buds Pro (1st generation), via the Maestro protocol.
     PixelBudsPro,
     /// Google Pixel Buds A-Series.

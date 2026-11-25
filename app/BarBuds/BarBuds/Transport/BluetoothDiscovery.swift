@@ -113,8 +113,8 @@ private final class BluetoothMonitor: NSObject {
         }
         #endif
         for model in models {
-            guard let uuid = rfcommServiceUuid(model: model),
-                  let sdpUUID = RFCOMMTransport.sdpUUID(uuid),
+            let uuid = rfcommServiceUuid(model: model)
+            guard let sdpUUID = RFCOMMTransport.sdpUUID(uuid),
                   device.getServiceRecord(for: sdpUUID) != nil
             else { continue }
             return (model, uuid)

@@ -298,40 +298,42 @@ impl BarBudsController {
 
 #[cfg(test)]
 mod tests {
+    //! Model-independent behaviour, against the generic Fast Pair simulator
+    //! (simple framing). Each model's own features are tested in its driver
+    //! and in `simulator.rs`.
     use super::*;
-    use crate::drivers::mock::MockEarbuds;
+    use crate::DeviceSimulator;
     use crate::model::BatteryReading;
 
-    fn connected() -> (Arc<BarBudsController>, Arc<MockEarbuds>) {
-        let controller = BarBudsController::new(DeviceModel::Mock);
-        let device = MockEarbuds::new();
+    fn connected() -> (Arc<BarBudsController>, Arc<DeviceSimulator>) {
+        let controller = BarBudsController::new(DeviceModel::FastPair);
+        let device = DeviceSimulator::new(DeviceModel::FastPair);
         controller.feed(device.receive(controller.start())).unwrap();
         (controller, device)
     }
 
     #[test]
     fn starts_empty() {
-        let controller = BarBudsController::new(DeviceModel::Mock);
+        let controller = BarBudsController::new(DeviceModel::FastPair);
         assert_eq!(controller.state(), DeviceState::default());
     }
 
     #[test]
-    fn status_request_populates_state() {
+    fn connecting_populates_state() {
         let (controller, _) = connected();
         let state = controller.state();
         assert_eq!(
             state.battery.left,
             Some(BatteryReading {
-                percent: 82,
+                percent: 90,
                 charging: false
             })
         );
         assert_eq!(state.anc, Some(AncMode::NoiseCancelling));
-        assert_eq!(state.eq.unwrap().preset.as_deref(), Some("flat"));
     }
 
     #[test]
-    fn anc_change_applies_after_device_confirms() {
+    fn a_change_applies_after_the_device_confirms() {
         let (controller, device) = connected();
         let frame = controller.encode_anc(AncMode::Transparency).unwrap();
         assert_eq!(controller.state().anc, Some(AncMode::NoiseCancelling));
@@ -340,45 +342,51 @@ mod tests {
     }
 
     #[test]
-    fn custom_eq_round_trip() {
-        let (controller, device) = connected();
+    fn unsupported_settings_are_refused() {
+        let (controller, _) = connected();
         let eq = EqSettings {
             preset: None,
-            gains: vec![1.0, 2.0, 3.0, -2.0, -4.0],
+            gains: vec![1.0],
         };
-        let state = controller
-            .feed(device.receive(controller.encode_eq(eq.clone()).unwrap()))
-            .unwrap();
-        assert_eq!(state.eq, Some(eq));
+        assert!(matches!(
+            controller.encode_eq(eq),
+            Err(BarBudsError::Unsupported { .. })
+        ));
+        assert!(controller.encode_balance(0).is_err());
     }
 
     #[test]
     fn tick_drains_battery() {
         let (controller, device) = connected();
         let state = controller.feed(device.tick()).unwrap();
-        assert_eq!(state.battery.left.unwrap().percent, 81);
-        assert_eq!(state.battery.charging_case.unwrap().percent, 64);
+        assert_eq!(state.battery.left.unwrap().percent, 89);
+        assert_eq!(state.battery.charging_case.unwrap().percent, 60);
     }
 
     #[test]
     fn handles_byte_at_a_time_delivery() {
-        let controller = BarBudsController::new(DeviceModel::Mock);
-        let reply = MockEarbuds::new().receive(controller.start());
+        let controller = BarBudsController::new(DeviceModel::FastPair);
+        let reply = DeviceSimulator::new(DeviceModel::FastPair).receive(controller.start());
         for byte in reply {
             controller.feed(vec![byte]).unwrap();
         }
         assert_eq!(controller.state().anc, Some(AncMode::NoiseCancelling));
+        assert_eq!(controller.state().battery.right.unwrap().percent, 85);
     }
 
     #[test]
     fn applies_valid_frames_around_garbage() {
-        let controller = BarBudsController::new(DeviceModel::Mock);
-        let device = MockEarbuds::new();
+        // Needs a protocol with a start-of-frame byte to resync on (Fast
+        // Pair messages have none), so this uses the Nothing protocol.
+        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let device = DeviceSimulator::new(DeviceModel::NothingEarOpen);
         let mut bytes = vec![0xDE, 0xAD];
         bytes.extend(device.receive(controller.start()));
         let err = controller.feed(bytes).unwrap_err();
         assert!(matches!(err, BarBudsError::MalformedFrame { .. }));
-        assert_eq!(controller.state().anc, Some(AncMode::NoiseCancelling));
+        let state = controller.state();
+        assert_eq!(state.battery.left.unwrap().percent, 100);
+        assert!(state.eq.is_some());
     }
 
     #[test]

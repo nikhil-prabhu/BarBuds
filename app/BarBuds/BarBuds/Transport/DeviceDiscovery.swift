@@ -27,22 +27,11 @@ nonisolated protocol DeviceDiscovery: Sendable {
     func events() -> AsyncStream<DiscoveryEvent>
 }
 
-/// Reports simulated earbuds as already connected, for UI development.
-nonisolated struct MockDiscovery: DeviceDiscovery {
-    var names: [String] = ["Mock Buds"]
-
+/// Finds nothing, for previews: they supply their own sessions, and the
+/// Debug menu's simulated devices are added directly.
+nonisolated struct NoDiscovery: DeviceDiscovery {
     func events() -> AsyncStream<DiscoveryEvent> {
-        AsyncStream { continuation in
-            for (index, name) in names.enumerated() {
-                continuation.yield(.connected(DiscoveredDevice(
-                    id: "mock-\(index)",
-                    name: name,
-                    model: .mock,
-                    makeTransport: { SimulatedTransport(model: .mock) },
-                    makeFindTransport: { SimulatedTransport.find() }
-                )))
-            }
-            // Leave the stream open: a real source keeps reporting changes.
-        }
+        // Left open, like a real source that may still report changes.
+        AsyncStream { _ in }
     }
 }

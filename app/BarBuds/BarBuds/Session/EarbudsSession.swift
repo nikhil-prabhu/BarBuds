@@ -256,7 +256,7 @@ extension EarbudsSession {
     /// A session already filled in from a simulated `model`, for static
     /// previews. It has no transport, so changing settings does nothing.
     static func preview(
-        model: DeviceModel = .mock,
+        model: DeviceModel = .pixelBudsPro,
         name: String? = nil,
         id: String = "preview",
         info: DeviceInfo? = nil

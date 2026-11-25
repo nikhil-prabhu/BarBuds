@@ -1,7 +1,7 @@
 import Foundation
 
 /// A byte pipe to one pair of earbuds: an RFCOMM/L2CAP channel, a GATT
-/// characteristic, or the in-process mock. Transports only move bytes; all
+/// characteristic, or a simulated device. Transports only move bytes; all
 /// framing and parsing happens in `BarBudsController`.
 ///
 /// `nonisolated` opts out of the target's default `MainActor` isolation so that
