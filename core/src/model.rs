@@ -116,7 +116,14 @@ pub struct DeviceCapabilities {
     pub has_balance: bool,
     /// Gestures whose action can be changed; `None` when there are none.
     pub controls: Option<ControlCapabilities>,
+    /// The noise-control modes a [`ControlAction::NoiseControl`] gesture can
+    /// cycle through, in display order; empty when the cycle is fixed. See
+    /// [`DeviceState::anc_cycle`].
+    pub anc_cycle_modes: Vec<AncMode>,
 }
+
+/// The fewest modes a noise-control cycle may hold (as the vendor apps require).
+pub const ANC_CYCLE_MIN_MODES: u32 = 2;
 
 /// The gesture controls a model lets the user remap.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -226,6 +233,9 @@ pub struct DeviceState {
     pub balance: Option<i32>,
     /// The current action of each remappable gesture the device has reported.
     pub controls: Vec<ControlSetting>,
+    /// The modes a noise-control gesture cycles through, in
+    /// [`DeviceCapabilities::anc_cycle_modes`] order, once reported.
+    pub anc_cycle: Option<Vec<AncMode>>,
 }
 
 /// See [`DeviceState::balance`].

@@ -6,8 +6,8 @@ use crate::driver::{EarbudDriver, Event};
 use crate::drivers::driver_for;
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, BALANCE_MAX, BALANCE_MIN, ControlSetting, DeviceCapabilities, DeviceModel,
-    DeviceState, EqSettings, FeatureToggle,
+    ANC_CYCLE_MIN_MODES, AncMode, BALANCE_MAX, BALANCE_MIN, ControlSetting, DeviceCapabilities,
+    DeviceModel, DeviceState, EqSettings, FeatureToggle,
 };
 
 /// Drop buffered bytes past this size; a well-behaved device never gets close.
@@ -59,6 +59,7 @@ fn apply(state: &mut DeviceState, event: Event) {
         Event::Firmware(firmware) => state.info.firmware = firmware,
         Event::Balance(balance) => state.balance = Some(balance),
         Event::SerialNumbers(serials) => state.info.serial_numbers = serials,
+        Event::AncCycle(modes) => state.anc_cycle = Some(modes),
         Event::Controls(settings) => {
             for setting in settings {
                 let slot =
@@ -240,6 +241,35 @@ impl BarBudsController {
             });
         }
         self.inner().driver.encode_control(setting)
+    }
+
+    /// Frame choosing which noise-control modes a noise-control gesture
+    /// cycles through (at least [`ANC_CYCLE_MIN_MODES`]). The state changes
+    /// once the device confirms it through `feed()`.
+    pub fn encode_anc_cycle(&self, modes: Vec<AncMode>) -> Result<Vec<u8>, BarBudsError> {
+        let offered = &self.capabilities.anc_cycle_modes;
+        if offered.is_empty() {
+            return Err(BarBudsError::Unsupported {
+                feature: "the noise-control cycle".to_string(),
+            });
+        }
+        if let Some(mode) = modes.iter().find(|m| !offered.contains(m)) {
+            return Err(BarBudsError::Unsupported {
+                feature: format!("{mode:?} in the noise-control cycle"),
+            });
+        }
+        // Capabilities order, without duplicates.
+        let modes: Vec<AncMode> = offered
+            .iter()
+            .copied()
+            .filter(|m| modes.contains(m))
+            .collect();
+        if modes.len() < ANC_CYCLE_MIN_MODES as usize {
+            return Err(BarBudsError::invalid_argument(format!(
+                "the noise-control cycle needs at least {ANC_CYCLE_MIN_MODES} modes"
+            )));
+        }
+        self.inner().driver.encode_anc_cycle(&modes)
     }
 
     /// Forget buffered bytes, protocol state and device state, e.g. after a disconnect.

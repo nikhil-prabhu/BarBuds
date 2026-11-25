@@ -62,7 +62,7 @@ impl DeviceSimulator {
 mod tests {
     use super::*;
     use crate::controller::BarBudsController;
-    use crate::model::{ControlSetting, EqSettings};
+    use crate::model::{ANC_CYCLE_MIN_MODES, AncMode, ControlSetting, EqSettings};
     use crate::supported_models;
 
     /// Relay bytes between controller and simulator until both are quiet,
@@ -94,6 +94,41 @@ mod tests {
             }
             for toggle in &caps.toggles {
                 assert!(state.toggles.contains_key(toggle), "{model:?}: {toggle:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_noise_control_cycle_round_trips() {
+        for model in supported_models() {
+            let (controller, sim) = connected(model);
+            let offered = controller.capabilities().anc_cycle_modes;
+            if offered.is_empty() {
+                assert!(controller.encode_anc_cycle(vec![]).is_err());
+                continue;
+            }
+            assert!(
+                controller.state().anc_cycle.is_some(),
+                "{model:?}: not reported"
+            );
+            // Every subset of at least two modes.
+            for mask in 0u32..(1 << offered.len()) {
+                let modes: Vec<AncMode> = offered
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| mask & (1 << i) != 0)
+                    .map(|(_, &m)| m)
+                    .collect();
+                if modes.len() < ANC_CYCLE_MIN_MODES as usize {
+                    assert!(controller.encode_anc_cycle(modes).is_err());
+                    continue;
+                }
+                exchange(
+                    &controller,
+                    &sim,
+                    controller.encode_anc_cycle(modes.clone()).unwrap(),
+                );
+                assert_eq!(controller.state().anc_cycle, Some(modes), "{model:?}");
             }
         }
     }

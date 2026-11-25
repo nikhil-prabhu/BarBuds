@@ -40,6 +40,8 @@ pub(crate) struct PixelBudsSim {
     volume_asymmetry: i32,
     /// Touch & hold actions; both buds cycle noise control by default.
     gesture_control: proto::GestureControl,
+    /// Noise-control cycle; ANC and Transparency by default.
+    anc_loop: proto::AncrGestureLoop,
     /// Refuse to share the saved curve, as pbpctrl saw on some firmware.
     #[cfg(test)]
     refuse_last_saved: bool,
@@ -83,6 +85,12 @@ impl PixelBudsSim {
                 proto::action_target::ANC_CONTROL,
                 proto::action_target::ANC_CONTROL,
             ),
+            anc_loop: proto::AncrGestureLoop {
+                active: true,
+                off: false,
+                aware: true,
+                adaptive: false,
+            },
             #[cfg(test)]
             refuse_last_saved: false,
             battery: proto::BatteryInfo {
@@ -217,6 +225,7 @@ impl PixelBudsSim {
                     Some(setting_id::VOLUME_ASYMMETRY) => {
                         Setting::VolumeAsymmetry(self.volume_asymmetry)
                     }
+                    Some(setting_id::ANCR_GESTURE_LOOP) => Setting::AncrGestureLoop(self.anc_loop),
                     Some(setting_id::GESTURE_CONTROL) => {
                         Setting::GestureControl(self.gesture_control.clone())
                     }
@@ -263,6 +272,19 @@ impl PixelBudsSim {
                     Setting::CurrentUserEq(bands) => self.eq = bands,
                     Setting::LastSavedUserEq(bands) => self.last_saved = bands,
                     Setting::VolumeAsymmetry(raw) => self.volume_asymmetry = raw,
+                    Setting::AncrGestureLoop(anc_loop) => {
+                        // Like the Pixel Buds app, refuse fewer than two modes.
+                        let on = [
+                            anc_loop.active,
+                            anc_loop.off,
+                            anc_loop.aware,
+                            anc_loop.adaptive,
+                        ];
+                        if on.iter().filter(|&&b| b).count() < 2 {
+                            return error(STATUS_INVALID_ARGUMENT);
+                        }
+                        self.anc_loop = anc_loop;
+                    }
                     Setting::GestureControl(ref control) => {
                         self.gesture_control = control.clone();
                     }

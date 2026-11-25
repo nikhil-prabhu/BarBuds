@@ -529,6 +529,7 @@ impl EarbudDriver for NothingEarOpenDriver {
             // Confirmed on hardware: the Ear (open) accepts the Fast Pair ring.
             can_ring: true,
             has_balance: false,
+            anc_cycle_modes: vec![],
             controls: Some(ControlCapabilities {
                 input: ControlInput::Pinch,
                 slots: [BudSide::Left, BudSide::Right]

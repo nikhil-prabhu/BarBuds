@@ -12,6 +12,9 @@ pub(crate) use crate::drivers::google::{BatteryInfo, DeviceBatteryInfo, battery_
 pub(crate) mod setting_id {
     /// Each bud's touch & hold action, see [`super::GestureControl`].
     pub const GESTURE_CONTROL: i32 = 7;
+    /// The modes a noise-control press & hold cycles through, see
+    /// [`super::AncrGestureLoop`].
+    pub const ANCR_GESTURE_LOOP: i32 = 12;
     pub const CURRENT_ANCR_STATE: i32 = 13;
     pub const CURRENT_USER_EQ: i32 = 16;
     /// Left/right balance, see [`balance_from_wire`].
@@ -96,6 +99,21 @@ impl GestureControl {
     }
 }
 
+/// `AncrGestureLoop`: which modes a noise-control press & hold cycles
+/// through. The Pixel Buds app (and pbpctrl) require at least two.
+#[derive(Clone, Copy, PartialEq, Message)]
+pub(crate) struct AncrGestureLoop {
+    #[prost(bool, tag = "1")]
+    pub active: bool,
+    #[prost(bool, tag = "2")]
+    pub off: bool,
+    #[prost(bool, tag = "3")]
+    pub aware: bool,
+    /// Adaptive ANC, on models that have it (not the first-generation Pro).
+    #[prost(bool, tag = "4")]
+    pub adaptive: bool,
+}
+
 /// `AncState`, the value of the `current_ancr_state` setting.
 pub(crate) mod anc_state {
     /// Reported while both buds are in the case.
@@ -130,7 +148,10 @@ pub(crate) struct SettingsRsp {
 /// decode as `value: None`.
 #[derive(Clone, PartialEq, Message)]
 pub(crate) struct SettingValue {
-    #[prost(oneof = "Setting", tags = "2, 4, 7, 11, 13, 15, 16, 17, 18, 19, 22")]
+    #[prost(
+        oneof = "Setting",
+        tags = "2, 4, 7, 11, 12, 13, 15, 16, 17, 18, 19, 22"
+    )]
     pub value: Option<Setting>,
 }
 
@@ -160,6 +181,8 @@ pub(crate) enum Setting {
     LastSavedUserEq(EqBands),
     #[prost(message, tag = "7")]
     GestureControl(GestureControl),
+    #[prost(message, tag = "12")]
+    AncrGestureLoop(AncrGestureLoop),
 }
 
 impl Setting {
@@ -189,7 +212,8 @@ impl Setting {
             | Setting::CurrentUserEq(_)
             | Setting::VolumeAsymmetry(_)
             | Setting::LastSavedUserEq(_)
-            | Setting::GestureControl(_) => return None,
+            | Setting::GestureControl(_)
+            | Setting::AncrGestureLoop(_) => return None,
         })
     }
 }

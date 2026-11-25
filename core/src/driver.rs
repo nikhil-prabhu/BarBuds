@@ -21,6 +21,8 @@ pub(crate) enum Event {
     SerialNumbers(ComponentStrings),
     /// Gesture actions; gestures not listed keep their last value.
     Controls(Vec<ControlSetting>),
+    /// The noise-control gesture's modes, in capabilities order.
+    AncCycle(Vec<AncMode>),
 }
 
 /// The outcome of decoding the frame at the front of a receive buffer.
@@ -71,6 +73,15 @@ pub(crate) trait EarbudDriver: Send {
         let _ = setting;
         Err(BarBudsError::Unsupported {
             feature: "gesture controls".to_string(),
+        })
+    }
+
+    /// Only called with at least `ANC_CYCLE_MIN_MODES` distinct modes, all
+    /// from `capabilities().anc_cycle_modes`, in that order.
+    fn encode_anc_cycle(&mut self, modes: &[AncMode]) -> Result<Vec<u8>, BarBudsError> {
+        let _ = modes;
+        Err(BarBudsError::Unsupported {
+            feature: "the noise-control cycle".to_string(),
         })
     }
 

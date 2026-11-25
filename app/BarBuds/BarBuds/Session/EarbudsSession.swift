@@ -131,6 +131,11 @@ final class EarbudsSession: Identifiable {
         Task { await send { try controller.encodeControl(setting: setting) } }
     }
 
+    /// Chooses the modes a noise-control gesture cycles through.
+    func setAncCycle(_ modes: [AncMode]) {
+        Task { await send { try controller.encodeAncCycle(modes: modes) } }
+    }
+
     /// Selects a preset by ID, or a custom curve for `nil`.
     func selectEqPreset(_ presetID: String?) {
         eqWriteTask?.cancel()

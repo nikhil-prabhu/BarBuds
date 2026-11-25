@@ -162,6 +162,7 @@ impl EarbudDriver for MockDriver {
             toggles: codec::TOGGLES.to_vec(),
             can_ring: true,
             has_balance: false,
+            anc_cycle_modes: vec![],
             controls: None,
         }
     }

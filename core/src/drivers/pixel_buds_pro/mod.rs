@@ -118,6 +118,27 @@ pub(crate) struct PixelBudsProDriver {
     /// Each bud's touch & hold [`action_target`], left and right, once
     /// reported. Writes carry both, so changing one keeps the other.
     hold_targets: Option<(i32, i32)>,
+    /// The noise-control cycle as last reported, so a write keeps flags
+    /// BarBuds doesn't show (Adaptive).
+    anc_loop: Option<proto::AncrGestureLoop>,
+}
+
+/// The modes the noise-control cycle can include, in the popover's order.
+const ANC_CYCLE_MODES: [AncMode; 3] = [
+    AncMode::Off,
+    AncMode::NoiseCancelling,
+    AncMode::Transparency,
+];
+
+fn anc_cycle(anc_loop: &proto::AncrGestureLoop) -> Vec<AncMode> {
+    ANC_CYCLE_MODES
+        .into_iter()
+        .filter(|mode| match mode {
+            AncMode::Off => anc_loop.off,
+            AncMode::NoiseCancelling => anc_loop.active,
+            AncMode::Transparency => anc_loop.aware,
+        })
+        .collect()
 }
 
 /// The touch & hold actions the Pixel Buds app offers (and pbpctrl sets).
@@ -203,6 +224,7 @@ impl PixelBudsProDriver {
                         setting_id::LAST_SAVED_USER_EQ,
                         setting_id::VOLUME_ASYMMETRY,
                         setting_id::GESTURE_CONTROL,
+                        setting_id::ANCR_GESTURE_LOOP,
                     ]
                     .into();
                     self.pending_reads.extend(TOGGLES.iter().map(|&(_, id)| id));
@@ -303,6 +325,10 @@ impl PixelBudsProDriver {
             }
             Some(Setting::VolumeAsymmetry(raw)) => {
                 Ok(Some(Event::Balance(proto::balance_from_wire(raw))))
+            }
+            Some(Setting::AncrGestureLoop(anc_loop)) => {
+                self.anc_loop = Some(anc_loop);
+                Ok(Some(Event::AncCycle(anc_cycle(&anc_loop))))
             }
             Some(Setting::GestureControl(control)) => {
                 let targets = control.targets();
@@ -416,6 +442,7 @@ impl EarbudDriver for PixelBudsProDriver {
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
             can_ring: true,
             has_balance: true,
+            anc_cycle_modes: ANC_CYCLE_MODES.to_vec(),
             controls: Some(ControlCapabilities {
                 // The Pixel Buds app says "Press & hold".
                 input: ControlInput::Press,
@@ -489,6 +516,20 @@ impl EarbudDriver for PixelBudsProDriver {
         self.write(
             Setting::GestureControl(control),
             Event::Controls(vec![setting]),
+        )
+    }
+
+    fn encode_anc_cycle(&mut self, modes: &[AncMode]) -> Result<Vec<u8>, BarBudsError> {
+        let adaptive = self.anc_loop.is_some_and(|l| l.adaptive);
+        let anc_loop = proto::AncrGestureLoop {
+            active: modes.contains(&AncMode::NoiseCancelling),
+            off: modes.contains(&AncMode::Off),
+            aware: modes.contains(&AncMode::Transparency),
+            adaptive,
+        };
+        self.write(
+            Setting::AncrGestureLoop(anc_loop),
+            Event::AncCycle(modes.to_vec()),
         )
     }
 
@@ -814,6 +855,69 @@ mod tests {
             controller
                 .encode_control(hold(BudSide::Right, ControlAction::PlayPause))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn noise_control_cycle_reads_and_writes() {
+        let (controller, mut sim) = connected();
+        assert_eq!(
+            controller.state().anc_cycle,
+            Some(vec![AncMode::NoiseCancelling, AncMode::Transparency])
+        );
+        let all = vec![
+            AncMode::Off,
+            AncMode::NoiseCancelling,
+            AncMode::Transparency,
+        ];
+        let frame = controller.encode_anc_cycle(all.clone()).unwrap();
+        exchange(&controller, &mut sim, frame);
+        assert_eq!(controller.state().anc_cycle, Some(all));
+        // At least two modes, as the Pixel Buds app requires.
+        assert!(matches!(
+            controller.encode_anc_cycle(vec![AncMode::Off]),
+            Err(BarBudsError::InvalidArgument { .. })
+        ));
+        // Order and duplicates don't matter.
+        let frame = controller
+            .encode_anc_cycle(vec![AncMode::Transparency, AncMode::Off, AncMode::Off])
+            .unwrap();
+        exchange(&controller, &mut sim, frame);
+        assert_eq!(
+            controller.state().anc_cycle,
+            Some(vec![AncMode::Off, AncMode::Transparency])
+        );
+    }
+
+    #[test]
+    fn noise_control_cycle_keeps_adaptive() {
+        // pbpctrl's layout: active = 1, off = 2, aware = 3, adaptive = 4.
+        let mut driver = PixelBudsProDriver {
+            channel: Some(21),
+            anc_loop: Some(proto::AncrGestureLoop {
+                active: true,
+                off: false,
+                aware: true,
+                adaptive: true,
+            }),
+            ..Default::default()
+        };
+        driver
+            .encode_anc_cycle(&[AncMode::Off, AncMode::NoiseCancelling])
+            .unwrap();
+        let Some(Event::AncCycle(modes)) = driver.pending_writes.back() else {
+            panic!("no pending cycle write");
+        };
+        assert_eq!(modes, &[AncMode::Off, AncMode::NoiseCancelling]);
+        let anc_loop = proto::AncrGestureLoop {
+            active: true,
+            off: true,
+            aware: false,
+            adaptive: true,
+        };
+        assert_eq!(
+            anc_loop.encode_to_vec(),
+            [0x08, 0x01, 0x10, 0x01, 0x20, 0x01]
         );
     }
 

@@ -269,6 +269,7 @@ impl EarbudDriver for PixelBudsASeriesDriver {
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
             can_ring: true,
             has_balance: false,
+            anc_cycle_modes: vec![],
             controls: None,
         }
     }

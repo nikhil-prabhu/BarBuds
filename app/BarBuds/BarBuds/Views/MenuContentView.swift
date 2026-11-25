@@ -132,7 +132,10 @@ private struct DeviceControls: View {
                 settings: session.state.controls,
                 formFactor: capabilities.formFactor,
                 isExpanded: $controlsExpanded,
-                onSet: session.setControl
+                onSet: session.setControl,
+                ancCycleModes: capabilities.ancCycleModes,
+                ancCycle: session.state.ancCycle,
+                onSetAncCycle: session.setAncCycle
             )
         }
 
