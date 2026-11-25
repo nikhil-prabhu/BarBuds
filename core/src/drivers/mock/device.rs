@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::codec::{self, frame_type};
 use super::{BAND_COUNT, MAX_GAIN_DB, MIN_GAIN_DB, preset_curve};
-use crate::model::{AncMode, BatteryReading, BatteryStatus, EqPreset, FeatureToggle};
+use crate::model::{AncMode, BatteryReading, BatteryStatus, FeatureToggle};
+use super::MockPreset;
 
 #[derive(uniffi::Object)]
 pub struct MockEarbuds {
@@ -16,7 +17,7 @@ pub struct MockEarbuds {
 struct SimState {
     battery: BatteryStatus,
     anc: AncMode,
-    preset: EqPreset,
+    preset: MockPreset,
     gains: [i8; BAND_COUNT],
     /// On/off state per entry of `codec::TOGGLES`.
     toggles: [bool; 3],
@@ -101,8 +102,8 @@ impl MockEarbuds {
                     charging_case: Some(BatteryReading { percent: 64, charging: true }),
                 },
                 anc: AncMode::NoiseCancelling,
-                preset: EqPreset::Flat,
-                gains: preset_curve(EqPreset::Flat).expect("Flat has a curve"),
+                preset: MockPreset::Flat,
+                gains: preset_curve(MockPreset::Flat).expect("Flat has a curve"),
                 toggles: [true, false, true],
                 rx: Vec::new(),
             }),

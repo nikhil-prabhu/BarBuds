@@ -12,8 +12,8 @@
 //!    changes, and reads the current ANC mode and EQ curve one at a time.
 //!
 //! The earbuds have no EQ presets: they store one 5-band curve. The presets
-//! offered here are curves BarBuds writes, and a reported curve is shown as a
-//! preset when it matches one.
+//! offered here are the Pixel Buds app's own curves, which BarBuds writes; a
+//! reported curve is shown as a preset when it matches one.
 //!
 //! Protocol knowledge comes from pbpctrl by Maximilian Luz
 //! (<https://github.com/qzed/pbpctrl>, MIT/Apache-2.0).
@@ -65,23 +65,29 @@ const GAIN_TOLERANCE_DB: f32 = 0.05;
 const PROBE_CALL_ID: u32 = u32::MAX;
 const CALL_ID: u32 = 0;
 
-fn preset_curve(preset: EqPreset) -> Option<[f32; 5]> {
-    match preset {
-        EqPreset::Flat => Some([0.0, 0.0, 0.0, 0.0, 0.0]),
-        EqPreset::BassBoost => Some([5.0, 3.0, 0.0, 0.0, 0.0]),
-        EqPreset::Vocal => Some([-2.0, 0.0, 3.0, 2.0, 0.0]),
-        EqPreset::TrebleBoost => Some([0.0, 0.0, 0.0, 3.0, 5.0]),
-        EqPreset::Custom => None,
-    }
-}
-
-const PRESETS: [EqPreset; 5] = [
-    EqPreset::Flat,
-    EqPreset::BassBoost,
-    EqPreset::Vocal,
-    EqPreset::TrebleBoost,
-    EqPreset::Custom,
+/// The Pixel Buds app's presets: `(id, name, curve)`. Each curve was read
+/// from real Pixel Buds Pro after selecting the preset in the app
+/// (2026-11-25). The app recognises a preset only by its exact curve, so
+/// these must not be rounded: BudsLink's table rounds Light Bass and Balanced,
+/// and writing those makes the app show "Last Saved" instead.
+const PRESETS: [(&str, &str, [f32; 5]); 6] = [
+    ("default", "Default", [0.0, 0.0, 0.0, 0.0, 0.0]),
+    ("heavy-bass", "Heavy Bass", [5.0, 3.0, 0.0, 0.0, 0.0]),
+    ("light-bass", "Light Bass", [-5.0, -1.5, 0.0, 0.0, 0.0]),
+    ("balanced", "Balanced", [-3.5, 0.5, 1.0, -1.0, 2.5]),
+    ("vocal-boost", "Vocal Boost", [-1.0, 0.0, 4.0, 2.0, 0.0]),
+    ("clarity", "Clarity", [-2.0, 0.0, 2.0, 3.0, 5.0]),
 ];
+
+/// The user's saved curve, offered as a preset like in the Pixel Buds app.
+const LAST_SAVED_ID: &str = "last-saved";
+
+fn preset_curve(id: &str) -> Option<[f32; 5]> {
+    PRESETS
+        .iter()
+        .find(|&&(preset_id, _, _)| preset_id == id)
+        .map(|&(_, _, curve)| curve)
+}
 
 fn same_curve(a: &[f32], b: &[f32]) -> bool {
     a.len() == b.len()
@@ -102,6 +108,12 @@ pub(crate) struct PixelBudsProDriver {
     /// The last EQ BarBuds wrote, so a curve it chose as "Custom" isn't shown
     /// as a matching preset when the earbuds echo it back.
     last_eq: Option<EqSettings>,
+    /// The setting the in-flight `ReadSetting` asked for.
+    reading: Option<i32>,
+    /// The curve the earbuds currently play, as last reported.
+    current_eq: Option<[f32; 5]>,
+    /// The user's saved custom curve ("Last Saved"), once reported.
+    last_saved: Option<[f32; 5]>,
 }
 
 impl PixelBudsProDriver {
@@ -115,7 +127,8 @@ impl PixelBudsProDriver {
     }
 
     fn send_next_read(&mut self, channel: u32, outbound: &mut Vec<u8>) {
-        if let Some(id) = self.pending_reads.pop_front() {
+        self.reading = self.pending_reads.pop_front();
+        if let Some(id) = self.reading {
             outbound.extend(self.request(channel, Method::ReadSetting, proto::read_setting(id)));
         }
     }
@@ -145,8 +158,12 @@ impl PixelBudsProDriver {
                         Method::SubscribeToSettingsChanges,
                         vec![],
                     ));
-                    self.pending_reads =
-                        [setting_id::CURRENT_ANCR_STATE, setting_id::CURRENT_USER_EQ].into();
+                    self.pending_reads = [
+                        setting_id::CURRENT_ANCR_STATE,
+                        setting_id::CURRENT_USER_EQ,
+                        setting_id::LAST_SAVED_USER_EQ,
+                    ]
+                    .into();
                     self.pending_reads.extend(TOGGLES.iter().map(|&(_, id)| id));
                     self.send_next_read(channel, outbound);
                     // The probe reply is the software info: the firmware versions.
@@ -193,8 +210,14 @@ impl PixelBudsProDriver {
                 Ok(google::serial_numbers(&info).map(Event::SerialNumbers))
             }
             Method::ReadSetting if is_reply => {
+                let id = self.reading.take();
                 self.send_next_read(channel, outbound);
                 if !ok {
+                    // Some firmware refuses to share the saved curve; then
+                    // "Last Saved" just isn't available.
+                    if id == Some(setting_id::LAST_SAVED_USER_EQ) {
+                        return Ok(None);
+                    }
                     return Err(failed("reading a setting"));
                 }
                 self.setting_event(decode(&packet.payload)?)
@@ -213,13 +236,21 @@ impl PixelBudsProDriver {
         }
     }
 
-    fn setting_event(&self, rsp: proto::SettingsRsp) -> Result<Option<Event>, BarBudsError> {
+    fn setting_event(&mut self, rsp: proto::SettingsRsp) -> Result<Option<Event>, BarBudsError> {
         match rsp.value.and_then(|v| v.value) {
             Some(Setting::CurrentAncrState(state)) => {
                 anc_mode(state).map(|mode| Some(Event::Anc(mode)))
             }
             Some(Setting::CurrentUserEq(bands)) => {
+                self.current_eq = Some(bands.gains());
                 Ok(Some(Event::Eq(self.eq_settings(bands.gains()))))
+            }
+            Some(Setting::LastSavedUserEq(bands)) => {
+                self.last_saved = Some(bands.gains());
+                // The current curve may now be recognisable as "Last Saved".
+                Ok(self
+                    .current_eq
+                    .map(|current| Event::Eq(self.eq_settings(current))))
             }
             Some(setting) => {
                 let (id, on) = setting.as_bool().expect("other settings are matched above");
@@ -238,14 +269,21 @@ impl PixelBudsProDriver {
             && same_curve(&last.gains, &gains)
         {
             return EqSettings {
-                preset: last.preset,
+                preset: last.preset.clone(),
                 gains: gains.to_vec(),
             };
         }
+        // Like the Pixel Buds app: the app's presets first, then the user's
+        // saved curve, else a custom curve.
         let preset = PRESETS
-            .into_iter()
-            .find(|&p| preset_curve(p).is_some_and(|curve| same_curve(&curve, &gains)))
-            .unwrap_or(EqPreset::Custom);
+            .iter()
+            .find(|(_, _, curve)| same_curve(curve, &gains))
+            .map(|&(id, _, _)| id.to_string())
+            .or_else(|| {
+                self.last_saved
+                    .filter(|saved| same_curve(saved, &gains))
+                    .map(|_| LAST_SAVED_ID.to_string())
+            });
         EqSettings {
             preset,
             gains: gains.to_vec(),
@@ -298,7 +336,15 @@ impl EarbudDriver for PixelBudsProDriver {
                 min_gain: MIN_GAIN_DB,
                 max_gain: MAX_GAIN_DB,
                 step: 0.5,
-                presets: PRESETS.to_vec(),
+                presets: PRESETS
+                    .iter()
+                    .map(|&(id, name, _)| (id, name))
+                    .chain([(LAST_SAVED_ID, "Last Saved")])
+                    .map(|(id, name)| EqPreset {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                    })
+                    .collect(),
             }),
             has_charging_case: true,
             form_factor: FormFactor::Stemless,
@@ -348,12 +394,17 @@ impl EarbudDriver for PixelBudsProDriver {
     }
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
-        let gains = match preset_curve(eq.preset) {
-            Some(curve) => curve,
+        let gains = match &eq.preset {
+            Some(id) if id == LAST_SAVED_ID => self.last_saved.ok_or_else(|| {
+                BarBudsError::device("these earbuds haven't shared a saved curve")
+            })?,
+            Some(id) => preset_curve(id).ok_or_else(|| BarBudsError::Unsupported {
+                feature: format!("EQ preset {id:?}"),
+            })?,
             None => custom_gains(&eq.gains)?,
         };
         let settings = EqSettings {
-            preset: eq.preset,
+            preset: eq.preset.clone(),
             gains: gains.to_vec(),
         };
         let frame = self.write(
@@ -448,7 +499,7 @@ mod tests {
         assert_eq!(
             state.eq,
             Some(EqSettings {
-                preset: EqPreset::Custom,
+                preset: None,
                 gains: vec![1.0, 0.5, 0.0, -1.5, 2.0]
             })
         );
@@ -558,26 +609,26 @@ mod tests {
         let (controller, mut sim) = connected();
 
         let bass = EqSettings {
-            preset: EqPreset::BassBoost,
+            preset: Some("heavy-bass".to_string()),
             gains: vec![],
         };
         exchange(&controller, &mut sim, controller.encode_eq(bass).unwrap());
         let eq = controller.state().eq.unwrap();
-        assert_eq!(eq.preset, EqPreset::BassBoost);
+        assert_eq!(eq.preset.as_deref(), Some("heavy-bass"));
         assert_eq!(eq.gains, [5.0, 3.0, 0.0, 0.0, 0.0]);
 
         // Custom gains are clamped to the device range.
         let custom = EqSettings {
-            preset: EqPreset::Custom,
+            preset: None,
             gains: vec![-9.0, 0.0, 1.5, 0.0, 9.0],
         };
         exchange(&controller, &mut sim, controller.encode_eq(custom).unwrap());
         assert_eq!(sim.eq(), [-6.0, 0.0, 1.5, 0.0, 6.0]);
-        assert_eq!(controller.state().eq.unwrap().preset, EqPreset::Custom);
+        assert_eq!(controller.state().eq.unwrap().preset, None);
 
-        // A Custom curve that happens to be flat stays Custom.
+        // A custom curve that happens to match the Default preset stays custom.
         let flat_custom = EqSettings {
-            preset: EqPreset::Custom,
+            preset: None,
             gains: vec![0.0; 5],
         };
         exchange(
@@ -585,7 +636,73 @@ mod tests {
             &mut sim,
             controller.encode_eq(flat_custom).unwrap(),
         );
-        assert_eq!(controller.state().eq.unwrap().preset, EqPreset::Custom);
+        assert_eq!(controller.state().eq.unwrap().preset, None);
+
+        // Unknown preset IDs are refused.
+        let unknown = EqSettings {
+            preset: Some("party".to_string()),
+            gains: vec![],
+        };
+        assert!(matches!(
+            controller.encode_eq(unknown),
+            Err(BarBudsError::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn last_saved_curve_is_a_preset() {
+        let (controller, mut sim) = connected();
+        let caps = controller.capabilities().eq.unwrap();
+        assert_eq!(caps.presets.last().unwrap().name, "Last Saved");
+
+        // Selecting it writes the saved curve the earbuds reported.
+        let request = EqSettings {
+            preset: Some("last-saved".to_string()),
+            gains: vec![],
+        };
+        exchange(
+            &controller,
+            &mut sim,
+            controller.encode_eq(request).unwrap(),
+        );
+        assert_eq!(sim.eq(), [2.0, 1.0, 0.0, 1.0, 2.0]);
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("last-saved")
+        );
+
+        // The saved curve set from a phone is recognised too.
+        controller
+            .feed(sim.external_eq_change([2.0, 1.0, 0.0, 1.0, 2.0]))
+            .unwrap();
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("last-saved")
+        );
+    }
+
+    #[test]
+    fn refused_last_saved_read_is_silent() {
+        let controller = BarBudsController::new(DeviceModel::PixelBudsPro);
+        let mut sim = PixelBudsSim::new(24);
+        sim.refuse_last_saved();
+        // No error surfaces, and the rest of the handshake still completes.
+        assert_eq!(exchange(&controller, &mut sim, controller.start()), None);
+        assert!(
+            controller
+                .state()
+                .toggles
+                .contains_key(&FeatureToggle::MonoAudio)
+        );
+
+        let request = EqSettings {
+            preset: Some("last-saved".to_string()),
+            gains: vec![],
+        };
+        assert!(matches!(
+            controller.encode_eq(request),
+            Err(BarBudsError::Device { .. })
+        ));
     }
 
     #[test]
@@ -593,7 +710,7 @@ mod tests {
         let (controller, _) = connected();
         for gains in [vec![0.0; 3], vec![0.0, f32::NAN, 0.0, 0.0, 0.0]] {
             let eq = EqSettings {
-                preset: EqPreset::Custom,
+                preset: None,
                 gains,
             };
             assert!(matches!(
@@ -613,9 +730,12 @@ mod tests {
         assert_eq!(controller.state().anc, Some(AncMode::Off));
 
         controller
-            .feed(sim.external_eq_change([0.0, 0.0, 0.0, 3.0, 5.0]))
+            .feed(sim.external_eq_change([-2.0, 0.0, 2.0, 3.0, 5.0]))
             .unwrap();
-        assert_eq!(controller.state().eq.unwrap().preset, EqPreset::TrebleBoost);
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("clarity")
+        );
 
         controller.feed(sim.battery_update(70, None)).unwrap();
         let battery = controller.state().battery;

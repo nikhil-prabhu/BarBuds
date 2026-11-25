@@ -3,7 +3,8 @@
 
 use super::BAND_COUNT;
 use crate::error::BarBudsError;
-use crate::model::{AncMode, BatteryReading, BatteryStatus, EqPreset, FeatureToggle};
+use crate::model::{AncMode, BatteryReading, BatteryStatus, FeatureToggle};
+use super::MockPreset;
 
 pub(crate) const MAGIC: u8 = 0xBB;
 const HEADER_LEN: usize = 3; // magic, type, len
@@ -155,34 +156,34 @@ pub(crate) fn decode_battery(payload: &[u8]) -> Result<BatteryStatus, BarBudsErr
 
 // --- EQ: [preset, band count, gain_db as i8 per band] ---
 
-fn preset_to_byte(preset: EqPreset) -> u8 {
+fn preset_to_byte(preset: MockPreset) -> u8 {
     match preset {
-        EqPreset::Flat => 0,
-        EqPreset::BassBoost => 1,
-        EqPreset::Vocal => 2,
-        EqPreset::TrebleBoost => 3,
-        EqPreset::Custom => PRESET_CUSTOM,
+        MockPreset::Flat => 0,
+        MockPreset::BassBoost => 1,
+        MockPreset::Vocal => 2,
+        MockPreset::TrebleBoost => 3,
+        MockPreset::Custom => PRESET_CUSTOM,
     }
 }
 
-fn byte_to_preset(byte: u8) -> Result<EqPreset, BarBudsError> {
+fn byte_to_preset(byte: u8) -> Result<MockPreset, BarBudsError> {
     match byte {
-        0 => Ok(EqPreset::Flat),
-        1 => Ok(EqPreset::BassBoost),
-        2 => Ok(EqPreset::Vocal),
-        3 => Ok(EqPreset::TrebleBoost),
-        PRESET_CUSTOM => Ok(EqPreset::Custom),
+        0 => Ok(MockPreset::Flat),
+        1 => Ok(MockPreset::BassBoost),
+        2 => Ok(MockPreset::Vocal),
+        3 => Ok(MockPreset::TrebleBoost),
+        PRESET_CUSTOM => Ok(MockPreset::Custom),
         other => Err(BarBudsError::malformed(format!("unknown EQ preset {other}"))),
     }
 }
 
-pub(crate) fn eq_payload(preset: EqPreset, gains: &[i8; BAND_COUNT]) -> Vec<u8> {
+pub(crate) fn eq_payload(preset: MockPreset, gains: &[i8; BAND_COUNT]) -> Vec<u8> {
     let mut payload = vec![preset_to_byte(preset), BAND_COUNT as u8];
     payload.extend(gains.iter().map(|&g| g as u8));
     payload
 }
 
-pub(crate) fn decode_eq(payload: &[u8]) -> Result<(EqPreset, [i8; BAND_COUNT]), BarBudsError> {
+pub(crate) fn decode_eq(payload: &[u8]) -> Result<(MockPreset, [i8; BAND_COUNT]), BarBudsError> {
     expect_len(payload, 2 + BAND_COUNT, "EQ")?;
     let preset = byte_to_preset(payload[0])?;
     if payload[1] as usize != BAND_COUNT {
@@ -281,7 +282,7 @@ mod tests {
     #[test]
     fn eq_round_trip_with_negative_gains() {
         let gains = [-6, -1, 0, 3, 6];
-        let payload = eq_payload(EqPreset::Custom, &gains);
-        assert_eq!(decode_eq(&payload).unwrap(), (EqPreset::Custom, gains));
+        let payload = eq_payload(MockPreset::Custom, &gains);
+        assert_eq!(decode_eq(&payload).unwrap(), (MockPreset::Custom, gains));
     }
 }

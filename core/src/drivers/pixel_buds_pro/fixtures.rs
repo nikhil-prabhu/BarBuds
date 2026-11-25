@@ -6,7 +6,7 @@
 
 use super::rpc::{self, Method, RpcPacket, packet_type};
 use crate::controller::BarBudsController;
-use crate::model::{BatteryReading, DeviceModel, EqPreset, EqSettings};
+use crate::model::{BatteryReading, DeviceModel, EqSettings};
 
 fn hex(s: &str) -> Vec<u8> {
     s.split_whitespace()
@@ -84,9 +84,34 @@ fn captured_handshake() {
     assert_eq!(state.anc, None);
     assert_eq!(
         state.eq,
+        // The captured curve is exactly the app's Vocal Boost preset.
         Some(EqSettings {
-            preset: EqPreset::Custom,
+            preset: Some("vocal-boost".to_string()),
             gains: vec![-1.0, 0.0, 4.0, 2.0, 0.0]
         })
     );
+}
+
+/// `SubscribeToSettingsChanges` streams captured while selecting presets in the
+/// Pixel Buds app on a phone (2026-11-25). Their curves aren't whole numbers.
+const RX_LIGHT_BASS: &str = "7e 00 a5 03 2a 1e 22 1c 82 01 19 0d 00 00 a0 c0 15 00 00 c0 bf 1d 00 00 00 00 \
+    25 00 00 00 00 2d 00 00 00 00 08 07 10 15 1d ea 71 de 7d 5e 25 f5 ad 21 28 54 3d 56 c4 7e";
+const RX_BALANCED: &str = "7e 00 a5 03 2a 1e 22 1c 82 01 19 0d 00 00 60 c0 15 00 00 00 3f 1d 00 00 80 3f \
+    25 00 00 80 bf 2d 00 00 20 40 08 07 10 15 1d ea 71 de 7d 5e 25 f5 ad 21 28 bc 8e 51 ea 7e";
+
+#[test]
+fn captured_app_presets_are_recognised() {
+    let controller = BarBudsController::new(DeviceModel::PixelBudsPro);
+    controller.start();
+    controller.feed(probe_reply(21)).unwrap();
+
+    controller.feed(hex(RX_LIGHT_BASS)).unwrap();
+    let eq = controller.state().eq.unwrap();
+    assert_eq!(eq.preset.as_deref(), Some("light-bass"));
+    assert_eq!(eq.gains, [-5.0, -1.5, 0.0, 0.0, 0.0]);
+
+    controller.feed(hex(RX_BALANCED)).unwrap();
+    let eq = controller.state().eq.unwrap();
+    assert_eq!(eq.preset.as_deref(), Some("balanced"));
+    assert_eq!(eq.gains, [-3.5, 0.5, 1.0, -1.0, 2.5]);
 }

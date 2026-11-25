@@ -4,8 +4,9 @@ import SwiftUI
 struct EqControl: View {
     let capabilities: EqCapabilities
     let settings: EqSettings
-    let onSelectPreset: (EqPreset) -> Void
-    /// Moving any slider switches the device to the Custom preset.
+    /// Selects a preset by ID; `nil` switches to a custom curve.
+    let onSelectPreset: (String?) -> Void
+    /// Moving any slider switches the device to a custom curve.
     let onSetGain: (_ gain: Float, _ bandIndex: Int) -> Void
 
     var body: some View {
@@ -14,11 +15,16 @@ struct EqControl: View {
                 Text("Equalizer")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                // Models with only a Custom curve have nothing to pick.
-                if capabilities.presets.count > 1 {
+                // Models with only a custom curve have nothing to pick.
+                if !capabilities.presets.isEmpty {
                     Picker("Preset", selection: presetBinding) {
-                        ForEach(capabilities.presets, id: \.self) { preset in
-                            Text(preset.title).tag(preset)
+                        ForEach(capabilities.presets, id: \.id) { preset in
+                            Text(preset.name).tag(Optional(preset.id))
+                        }
+                        // Presets are the vendor's; "Custom" means the user's own curve.
+                        if !capabilities.bandLabels.isEmpty {
+                            Divider()
+                            Text("Custom").tag(String?.none)
                         }
                     }
                     .labelsHidden()
@@ -35,7 +41,7 @@ struct EqControl: View {
         }
     }
 
-    private var presetBinding: Binding<EqPreset> {
+    private var presetBinding: Binding<String?> {
         Binding(get: { settings.preset }, set: onSelectPreset)
     }
 
@@ -71,9 +77,13 @@ struct EqControl: View {
             minGain: -6,
             maxGain: 6,
             step: 0.5,
-            presets: [.flat, .bassBoost, .vocal, .trebleBoost, .custom]
+            presets: [
+                EqPreset(id: "default", name: "Default"),
+                EqPreset(id: "heavy-bass", name: "Heavy Bass"),
+                EqPreset(id: "vocal-boost", name: "Vocal Boost"),
+            ]
         ),
-        settings: EqSettings(preset: .custom, gains: [1, 0.5, 0, -1.5, 2]),
+        settings: EqSettings(preset: nil, gains: [1, 0.5, 0, -1.5, 2]),
         onSelectPreset: { _ in },
         onSetGain: { _, _ in }
     )
@@ -89,9 +99,9 @@ struct EqControl: View {
             minGain: -1,
             maxGain: 4,
             step: 1,
-            presets: [.custom]
+            presets: []
         ),
-        settings: EqSettings(preset: .custom, gains: [2]),
+        settings: EqSettings(preset: nil, gains: [2]),
         onSelectPreset: { _ in },
         onSetGain: { _, _ in }
     )

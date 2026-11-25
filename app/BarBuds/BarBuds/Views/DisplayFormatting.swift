@@ -83,18 +83,6 @@ extension FeatureToggle {
     }
 }
 
-extension EqPreset {
-    var title: String {
-        switch self {
-        case .flat: "Flat"
-        case .bassBoost: "Bass Boost"
-        case .vocal: "Vocal"
-        case .trebleBoost: "Treble Boost"
-        case .custom: "Custom"
-        }
-    }
-}
-
 enum Units {
     /// Decibels: 3 → "+3 dB", 0 → "0 dB", -2.5 → "-2.5 dB". Levels: 2 → "+2".
     static func gain(_ value: Float, unit: EqUnit) -> String {

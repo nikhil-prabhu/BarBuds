@@ -55,21 +55,23 @@ pub enum FeatureToggle {
     TouchControls,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
-pub enum EqPreset {
-    Flat,
-    BassBoost,
-    Vocal,
-    TrebleBoost,
-    /// User-defined curve; the band gains in [`EqSettings`] are used as-is.
-    Custom,
+/// An EQ preset a model offers, as its vendor's app names it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
+pub struct EqPreset {
+    /// Stable identifier, unique within the model (e.g. `"heavy-bass"`).
+    pub id: String,
+    /// Display name, e.g. "Heavy Bass".
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct EqSettings {
-    pub preset: EqPreset,
+    /// The active preset's [`EqPreset::id`], or `None` for the user's own
+    /// curve in `gains`.
+    pub preset: Option<String>,
     /// One gain per band in [`EqCapabilities::band_labels`], in [`EqCapabilities::unit`].
-    /// Ignored when encoding a non-`Custom` preset; the driver applies the preset's curve.
+    /// When encoding a preset, the driver applies the preset's own curve and
+    /// ignores these.
     pub gains: Vec<f32>,
 }
 
@@ -118,7 +120,8 @@ pub struct EqCapabilities {
     pub min_gain: f32,
     pub max_gain: f32,
     pub step: f32,
-    /// A model without built-in curves lists only `Custom`.
+    /// The model's presets, in display order; empty when it has none. A
+    /// custom curve is available whenever `band_labels` is non-empty.
     pub presets: Vec<EqPreset>,
 }
 

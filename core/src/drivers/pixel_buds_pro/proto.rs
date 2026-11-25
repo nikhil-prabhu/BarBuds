@@ -12,6 +12,9 @@ pub(crate) use crate::drivers::google::{BatteryInfo, DeviceBatteryInfo, battery_
 pub(crate) mod setting_id {
     pub const CURRENT_ANCR_STATE: i32 = 13;
     pub const CURRENT_USER_EQ: i32 = 16;
+    /// The user's saved custom curve ("Last Saved" in the Pixel Buds app).
+    /// pbpctrl saw reads fail on its firmware; BudsLink reads it fine.
+    pub const LAST_SAVED_USER_EQ: i32 = 18;
 }
 
 /// The on/off settings BarBuds shows, by `AllegroSettingType` ID. Each is a
@@ -63,7 +66,7 @@ pub(crate) struct SettingsRsp {
 /// decode as `value: None`.
 #[derive(Clone, PartialEq, Message)]
 pub(crate) struct SettingValue {
-    #[prost(oneof = "Setting", tags = "2, 4, 11, 13, 15, 16, 19, 22")]
+    #[prost(oneof = "Setting", tags = "2, 4, 11, 13, 15, 16, 18, 19, 22")]
     pub value: Option<Setting>,
 }
 
@@ -86,6 +89,8 @@ pub(crate) enum Setting {
     CurrentAncrState(i32),
     #[prost(message, tag = "16")]
     CurrentUserEq(EqBands),
+    #[prost(message, tag = "18")]
+    LastSavedUserEq(EqBands),
 }
 
 impl Setting {
@@ -111,38 +116,52 @@ impl Setting {
             Setting::VolumeEqEnable(on) => (bool_setting::VOLUME_EQ_ENABLE, on),
             Setting::SumToMono(on) => (bool_setting::SUM_TO_MONO, on),
             Setting::SpeechDetection(on) => (bool_setting::SPEECH_DETECTION, on),
-            Setting::CurrentAncrState(_) | Setting::CurrentUserEq(_) => return None,
+            Setting::CurrentAncrState(_)
+            | Setting::CurrentUserEq(_)
+            | Setting::LastSavedUserEq(_) => return None,
         })
     }
 }
 
 /// `EqBands`: gains in dB, from -6.0 to 6.0.
+///
+/// The fields are `optional` so every band is sent, zeros included, as the
+/// Pixel Buds app does: the earbuds treat a missing band as "unchanged", so
+/// leaving out a 0 dB band would keep its previous value (seen on real Pixel
+/// Buds Pro, 2026-11-25).
 #[derive(Clone, Copy, PartialEq, Message)]
 pub(crate) struct EqBands {
-    #[prost(float, tag = "1")]
-    pub low_bass: f32,
-    #[prost(float, tag = "2")]
-    pub bass: f32,
-    #[prost(float, tag = "3")]
-    pub mid: f32,
-    #[prost(float, tag = "4")]
-    pub treble: f32,
-    #[prost(float, tag = "5")]
-    pub upper_treble: f32,
+    #[prost(float, optional, tag = "1")]
+    pub low_bass: Option<f32>,
+    #[prost(float, optional, tag = "2")]
+    pub bass: Option<f32>,
+    #[prost(float, optional, tag = "3")]
+    pub mid: Option<f32>,
+    #[prost(float, optional, tag = "4")]
+    pub treble: Option<f32>,
+    #[prost(float, optional, tag = "5")]
+    pub upper_treble: Option<f32>,
 }
 
 impl EqBands {
+    /// All five bands, each present.
     pub fn from_gains(g: [f32; 5]) -> Self {
         Self {
-            low_bass: g[0],
-            bass: g[1],
-            mid: g[2],
-            treble: g[3],
-            upper_treble: g[4],
+            low_bass: Some(g[0]),
+            bass: Some(g[1]),
+            mid: Some(g[2]),
+            treble: Some(g[3]),
+            upper_treble: Some(g[4]),
         }
     }
 
+    /// The gains, reading a missing band as 0 dB. (The earbuds always report
+    /// all five.)
     pub fn gains(&self) -> [f32; 5] {
+        self.fields().map(|band| band.unwrap_or(0.0))
+    }
+
+    fn fields(&self) -> [Option<f32>; 5] {
         [
             self.low_bass,
             self.bass,
@@ -150,6 +169,21 @@ impl EqBands {
             self.treble,
             self.upper_treble,
         ]
+    }
+
+    /// `self` updated by `update` the way the earbuds apply a write: bands
+    /// missing from `update` keep their current value.
+    pub fn merged(&self, update: &EqBands) -> EqBands {
+        let current = self.fields();
+        let new = update.fields();
+        let pick = |i: usize| new[i].or(current[i]);
+        EqBands {
+            low_bass: pick(0),
+            bass: pick(1),
+            mid: pick(2),
+            treble: pick(3),
+            upper_treble: pick(4),
+        }
     }
 }
 
@@ -199,6 +233,39 @@ mod tests {
             assert_eq!(msg.setting.unwrap().value, Some(setting), "setting {id}");
         }
         assert_eq!(Setting::from_bool(13, true), None);
+    }
+
+    #[test]
+    fn eq_writes_include_zero_bands() {
+        // The Pixel Buds app's Vocal Boost write, captured on a phone
+        // (2026-11-25): every band present, zeros included.
+        let expected = [
+            0x0d, 0x00, 0x00, 0x80, 0xbf, // low bass -1.0
+            0x15, 0x00, 0x00, 0x00, 0x00, // bass 0.0
+            0x1d, 0x00, 0x00, 0x80, 0x40, // mid 4.0
+            0x25, 0x00, 0x00, 0x00, 0x40, // treble 2.0
+            0x2d, 0x00, 0x00, 0x00, 0x00, // upper treble 0.0
+        ];
+        let bands = EqBands::from_gains([-1.0, 0.0, 4.0, 2.0, 0.0]);
+        assert_eq!(bands.encode_to_vec(), expected);
+    }
+
+    #[test]
+    fn missing_bands_keep_their_value_when_merged() {
+        let balanced = EqBands::from_gains([-3.5, 0.5, 1.0, -1.0, 2.5]);
+        // What the old encoder sent for Heavy Bass: only the non-zero bands.
+        let partial = EqBands {
+            low_bass: Some(5.0),
+            bass: Some(3.0),
+            ..Default::default()
+        };
+        // The mix seen on real earbuds.
+        assert_eq!(
+            balanced.merged(&partial).gains(),
+            [5.0, 3.0, 1.0, -1.0, 2.5]
+        );
+        let heavy = EqBands::from_gains([5.0, 3.0, 0.0, 0.0, 0.0]);
+        assert_eq!(balanced.merged(&heavy).gains(), [5.0, 3.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]

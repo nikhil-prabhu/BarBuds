@@ -23,7 +23,7 @@
 //! - `0x01` acknowledgement: `{1: type of the message acknowledged}`.
 //!
 //! The bass slider (setting 14) stores levels -1…4 as 0…5. It maps to a
-//! one-band EQ in [`EqUnit::Level`]s with no presets.
+//! one-band EQ in [`EqUnit::Level`]s with no presets (a custom curve only).
 //!
 //! Reverse-engineered from Bluetooth HCI captures of the Pixel Buds app on a
 //! Pixel phone changing each setting (2026-11-23).
@@ -36,8 +36,7 @@ use crate::driver::{Decoded, EarbudDriver, Event};
 use crate::drivers::google::{self, FirmwareVersion, HardwareInfo, RuntimeInfo, SoftwareInfo};
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
-    FormFactor,
+    AncMode, DeviceCapabilities, EqCapabilities, EqSettings, EqUnit, FeatureToggle, FormFactor,
 };
 
 /// RFCOMM service UUID of the control channel.
@@ -79,7 +78,7 @@ const BASS_OFFSET: i64 = 1;
 
 fn bass_eq(level: i64) -> EqSettings {
     EqSettings {
-        preset: EqPreset::Custom,
+        preset: None,
         gains: vec![level as f32],
     }
 }
@@ -263,7 +262,7 @@ impl EarbudDriver for PixelBudsASeriesDriver {
                 min_gain: MIN_BASS as f32,
                 max_gain: MAX_BASS as f32,
                 step: 1.0,
-                presets: vec![EqPreset::Custom],
+                presets: vec![],
             }),
             has_charging_case: true,
             form_factor: FormFactor::Stemless,
@@ -506,7 +505,7 @@ mod tests {
         let controller = connected();
         let set = |level: f32| {
             controller.encode_eq(EqSettings {
-                preset: EqPreset::Custom,
+                preset: None,
                 gains: vec![level],
             })
         };
@@ -528,7 +527,7 @@ mod tests {
     fn bass_rejects_wrong_band_count() {
         let controller = connected();
         let eq = EqSettings {
-            preset: EqPreset::Custom,
+            preset: None,
             gains: vec![0.0, 0.0],
         };
         assert!(matches!(
@@ -610,10 +609,10 @@ mod tests {
         let eq = caps.eq.unwrap();
         assert_eq!(eq.band_labels, ["Bass"]);
         assert_eq!(eq.unit, EqUnit::Level);
-        assert_eq!(eq.presets, [EqPreset::Custom]);
+        assert!(eq.presets.is_empty());
         // Presets other than Custom are refused before reaching the driver.
         let flat = EqSettings {
-            preset: EqPreset::Flat,
+            preset: Some("flat".to_string()),
             gains: vec![],
         };
         assert!(matches!(

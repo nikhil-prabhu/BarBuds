@@ -153,14 +153,17 @@ impl BarBudsController {
     }
 
     pub fn encode_eq(&self, eq: EqSettings) -> Result<Vec<u8>, BarBudsError> {
-        let supported = self
-            .capabilities
-            .eq
-            .as_ref()
-            .is_some_and(|caps| caps.presets.contains(&eq.preset));
+        // A preset must be one the model lists; a custom curve needs bands.
+        let supported = self.capabilities.eq.as_ref().is_some_and(|caps| match &eq.preset {
+            Some(id) => caps.presets.iter().any(|preset| &preset.id == id),
+            None => !caps.band_labels.is_empty(),
+        });
         if !supported {
             return Err(BarBudsError::Unsupported {
-                feature: format!("EQ preset {:?}", eq.preset),
+                feature: match &eq.preset {
+                    Some(id) => format!("EQ preset {id:?}"),
+                    None => "a custom EQ curve".to_string(),
+                },
             });
         }
         self.inner().driver.encode_eq(&eq)
@@ -187,7 +190,7 @@ impl BarBudsController {
 mod tests {
     use super::*;
     use crate::drivers::mock::MockEarbuds;
-    use crate::model::{BatteryReading, EqPreset};
+    use crate::model::BatteryReading;
 
     fn connected() -> (Arc<BarBudsController>, Arc<MockEarbuds>) {
         let controller = BarBudsController::new(DeviceModel::Mock);
@@ -210,7 +213,7 @@ mod tests {
         let state = controller.state();
         assert_eq!(state.battery.left, Some(BatteryReading { percent: 82, charging: false }));
         assert_eq!(state.anc, Some(AncMode::NoiseCancelling));
-        assert_eq!(state.eq.unwrap().preset, EqPreset::Flat);
+        assert_eq!(state.eq.unwrap().preset.as_deref(), Some("flat"));
     }
 
     #[test]
@@ -226,7 +229,7 @@ mod tests {
     fn custom_eq_round_trip() {
         let (controller, device) = connected();
         let eq = EqSettings {
-            preset: EqPreset::Custom,
+            preset: None,
             gains: vec![1.0, 2.0, 3.0, -2.0, -4.0],
         };
         let state = controller

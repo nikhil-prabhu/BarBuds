@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn every_anc_mode_and_eq_preset_round_trips() {
+    fn every_anc_mode_eq_preset_and_custom_curve_round_trips() {
         for model in supported_models() {
             let (controller, sim) = connected(model);
             let caps = controller.capabilities();
@@ -130,13 +130,29 @@ mod tests {
             let Some(eq) = caps.eq else { continue };
             for preset in eq.presets {
                 let gains = controller.state().eq.map(|eq| eq.gains).unwrap_or_default();
-                let request = EqSettings { preset, gains };
+                let request = EqSettings {
+                    preset: Some(preset.id.clone()),
+                    gains,
+                };
                 exchange(&controller, &sim, controller.encode_eq(request).unwrap());
                 assert_eq!(
-                    controller.state().eq.unwrap().preset,
-                    preset,
-                    "{model:?}: {preset:?}"
+                    controller.state().eq.unwrap().preset.as_deref(),
+                    Some(preset.id.as_str()),
+                    "{model:?}: {}",
+                    preset.name
                 );
+            }
+            // Models with bands also take a custom curve: every band at its maximum.
+            if !eq.band_labels.is_empty() {
+                let gains = vec![eq.max_gain; eq.band_labels.len()];
+                let request = EqSettings {
+                    preset: None,
+                    gains: gains.clone(),
+                };
+                exchange(&controller, &sim, controller.encode_eq(request).unwrap());
+                let state = controller.state().eq.unwrap();
+                assert_eq!(state.preset, None, "{model:?}: custom");
+                assert_eq!(state.gains, gains, "{model:?}: custom");
             }
         }
     }

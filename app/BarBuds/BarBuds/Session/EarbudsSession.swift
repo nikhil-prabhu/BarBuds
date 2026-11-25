@@ -42,7 +42,11 @@ final class EarbudsSession: Identifiable {
         capabilities = controller.capabilities()
         state = controller.state()
         makeTransport = device.makeTransport
-        find = capabilities.canRing ? device.makeFindTransport.map(FindSession.init) : nil
+        if capabilities.canRing, let makeFindTransport = device.makeFindTransport {
+            find = FindSession(makeTransport: makeFindTransport)
+        } else {
+            find = nil
+        }
     }
 
     /// The EQ to display: the in-progress edit if there is one, else the confirmed state.
@@ -116,20 +120,21 @@ final class EarbudsSession: Identifiable {
         Task { await send { try controller.encodeToggle(toggle: toggle, on: on) } }
     }
 
-    func selectEqPreset(_ preset: EqPreset) {
+    /// Selects a preset by ID, or a custom curve for `nil`.
+    func selectEqPreset(_ presetID: String?) {
         eqWriteTask?.cancel()
         eqWriteTask = nil
         eqDraft = nil
-        // Switching to Custom starts from the curve currently shown.
-        let settings = EqSettings(preset: preset, gains: eq?.gains ?? [])
+        // Switching to a custom curve starts from the curve currently shown.
+        let settings = EqSettings(preset: presetID, gains: eq?.gains ?? [])
         Task { await send { try controller.encodeEq(eq: settings) } }
     }
 
-    /// Moves one band, switching to the Custom preset. Writes are debounced so
+    /// Moves one band, switching to a custom curve. Writes are debounced so
     /// dragging a slider doesn't flood the Bluetooth channel.
     func setGain(_ gain: Float, forBandAt index: Int) {
         guard var draft = eq, draft.gains.indices.contains(index) else { return }
-        draft.preset = .custom
+        draft.preset = nil
         draft.gains[index] = gain
         eqDraft = draft
 

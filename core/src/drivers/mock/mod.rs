@@ -47,20 +47,65 @@ const BAND_LABELS: [&str; BAND_COUNT] = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "1
 const MIN_GAIN_DB: i8 = -6;
 const MAX_GAIN_DB: i8 = 6;
 
-/// Band gains the device applies for each built-in preset.
-fn preset_curve(preset: EqPreset) -> Option<[i8; BAND_COUNT]> {
-    match preset {
-        EqPreset::Flat => Some([0, 0, 0, 0, 0]),
-        EqPreset::BassBoost => Some([5, 3, 0, 0, 0]),
-        EqPreset::Vocal => Some([-2, 0, 3, 2, 0]),
-        EqPreset::TrebleBoost => Some([0, 0, 0, 3, 5]),
-        EqPreset::Custom => None,
+/// The mock protocol's EQ presets, as encoded on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MockPreset {
+    Flat,
+    BassBoost,
+    Vocal,
+    TrebleBoost,
+    /// The user's own curve.
+    Custom,
+}
+
+impl MockPreset {
+    const BUILT_IN: [MockPreset; 4] = [
+        MockPreset::Flat,
+        MockPreset::BassBoost,
+        MockPreset::Vocal,
+        MockPreset::TrebleBoost,
+    ];
+
+    /// The [`EqPreset`] shown for a built-in preset; `None` for `Custom`.
+    fn info(self) -> Option<EqPreset> {
+        let (id, name) = match self {
+            MockPreset::Flat => ("flat", "Flat"),
+            MockPreset::BassBoost => ("bass-boost", "Bass Boost"),
+            MockPreset::Vocal => ("vocal", "Vocal"),
+            MockPreset::TrebleBoost => ("treble-boost", "Treble Boost"),
+            MockPreset::Custom => return None,
+        };
+        Some(EqPreset {
+            id: id.to_string(),
+            name: name.to_string(),
+        })
+    }
+
+    /// The preset for an [`EqSettings::preset`] ID (`None` = custom).
+    fn from_id(id: Option<&str>) -> Option<Self> {
+        let Some(id) = id else {
+            return Some(MockPreset::Custom);
+        };
+        Self::BUILT_IN
+            .into_iter()
+            .find(|preset| preset.info().is_some_and(|info| info.id == id))
     }
 }
 
-fn eq_settings(preset: EqPreset, gains: &[i8; BAND_COUNT]) -> EqSettings {
+/// Band gains the device applies for each built-in preset.
+fn preset_curve(preset: MockPreset) -> Option<[i8; BAND_COUNT]> {
+    match preset {
+        MockPreset::Flat => Some([0, 0, 0, 0, 0]),
+        MockPreset::BassBoost => Some([5, 3, 0, 0, 0]),
+        MockPreset::Vocal => Some([-2, 0, 3, 2, 0]),
+        MockPreset::TrebleBoost => Some([0, 0, 0, 3, 5]),
+        MockPreset::Custom => None,
+    }
+}
+
+fn eq_settings(preset: MockPreset, gains: &[i8; BAND_COUNT]) -> EqSettings {
     EqSettings {
-        preset,
+        preset: preset.info().map(|info| info.id),
         gains: gains.iter().map(|&gain| f32::from(gain)).collect(),
     }
 }
@@ -100,13 +145,7 @@ impl EarbudDriver for MockDriver {
                 min_gain: f32::from(MIN_GAIN_DB),
                 max_gain: f32::from(MAX_GAIN_DB),
                 step: 1.0,
-                presets: vec![
-                    EqPreset::Flat,
-                    EqPreset::BassBoost,
-                    EqPreset::Vocal,
-                    EqPreset::TrebleBoost,
-                    EqPreset::Custom,
-                ],
+                presets: MockPreset::BUILT_IN.iter().filter_map(|p| p.info()).collect(),
             }),
             has_charging_case: true,
             form_factor: FormFactor::Stemmed,
@@ -142,11 +181,16 @@ impl EarbudDriver for MockDriver {
     }
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
-        let gains = match preset_curve(eq.preset) {
+        let preset = MockPreset::from_id(eq.preset.as_deref()).ok_or_else(|| {
+            BarBudsError::Unsupported {
+                feature: format!("EQ preset {:?}", eq.preset),
+            }
+        })?;
+        let gains = match preset_curve(preset) {
             Some(curve) => curve,
             None => quantize_gains(&eq.gains)?,
         };
-        Ok(codec::encode(frame_type::SET_EQ, &codec::eq_payload(eq.preset, &gains)))
+        Ok(codec::encode(frame_type::SET_EQ, &codec::eq_payload(preset, &gains)))
     }
 }
 
@@ -157,7 +201,7 @@ mod tests {
     #[test]
     fn custom_eq_is_rounded_and_clamped() {
         let eq = EqSettings {
-            preset: EqPreset::Custom,
+            preset: None,
             gains: vec![-9.0, -0.4, 0.6, 2.5, 12.0],
         };
         let frame = MockDriver.encode_eq(&eq).unwrap();
@@ -169,20 +213,20 @@ mod tests {
     #[test]
     fn preset_eq_ignores_supplied_bands() {
         let eq = EqSettings {
-            preset: EqPreset::BassBoost,
+            preset: Some("bass-boost".to_string()),
             gains: vec![],
         };
         let frame = MockDriver.encode_eq(&eq).unwrap();
         let (_, raw) = codec::decode(&frame).unwrap();
         let (preset, gains) = codec::decode_eq(raw.unwrap().payload).unwrap();
-        assert_eq!(preset, EqPreset::BassBoost);
-        assert_eq!(Some(gains), preset_curve(EqPreset::BassBoost));
+        assert_eq!(preset, MockPreset::BassBoost);
+        assert_eq!(Some(gains), preset_curve(MockPreset::BassBoost));
     }
 
     #[test]
     fn custom_eq_rejects_wrong_band_count_and_nan() {
         let short = EqSettings {
-            preset: EqPreset::Custom,
+            preset: None,
             gains: vec![0.0; 3],
         };
         assert!(matches!(
@@ -190,7 +234,7 @@ mod tests {
             Err(BarBudsError::InvalidArgument { .. })
         ));
         let nan = EqSettings {
-            preset: EqPreset::Custom,
+            preset: None,
             gains: vec![0.0, f32::NAN, 0.0, 0.0, 0.0],
         };
         assert!(matches!(

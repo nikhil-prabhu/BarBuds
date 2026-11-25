@@ -16,6 +16,9 @@ use super::proto::{
 use super::rpc::{self, Method, RpcPacket, packet_type};
 use super::{hdlc, rpc::MAESTRO_SERVICE};
 
+/// What pbpctrl saw when reading the saved curve failed.
+#[cfg(test)]
+const STATUS_UNKNOWN: u32 = 2;
 const STATUS_INVALID_ARGUMENT: u32 = 3;
 /// Sent for requests on channels the device doesn't serve, and unknown settings.
 const STATUS_NOT_FOUND: u32 = 5;
@@ -31,6 +34,11 @@ pub(crate) struct PixelBudsSim {
     rx: Vec<u8>,
     anc: i32,
     eq: proto::EqBands,
+    /// The user's saved custom curve ("Last Saved").
+    last_saved: proto::EqBands,
+    /// Refuse to share the saved curve, as pbpctrl saw on some firmware.
+    #[cfg(test)]
+    refuse_last_saved: bool,
     /// On/off settings by ID.
     bools: HashMap<i32, bool>,
     battery: proto::BatteryInfo,
@@ -65,6 +73,9 @@ impl PixelBudsSim {
                 (bool_setting::SPEECH_DETECTION, false),
             ]),
             eq: proto::EqBands::from_gains([1.0, 0.5, 0.0, -1.5, 2.0]),
+            last_saved: proto::EqBands::from_gains([2.0, 1.0, 0.0, 1.0, 2.0]),
+            #[cfg(test)]
+            refuse_last_saved: false,
             battery: proto::BatteryInfo {
                 left: battery(71, false),
                 right: battery(69, false),
@@ -90,6 +101,11 @@ impl PixelBudsSim {
     #[cfg(test)]
     pub fn eq(&self) -> [f32; 5] {
         self.eq.gains()
+    }
+
+    #[cfg(test)]
+    pub fn refuse_last_saved(&mut self) {
+        self.refuse_last_saved = true;
     }
 
     #[cfg(test)]
@@ -179,6 +195,13 @@ impl PixelBudsSim {
                 let setting = match msg.settings_id {
                     Some(setting_id::CURRENT_ANCR_STATE) => Setting::CurrentAncrState(self.anc),
                     Some(setting_id::CURRENT_USER_EQ) => Setting::CurrentUserEq(self.eq),
+                    Some(setting_id::LAST_SAVED_USER_EQ) => {
+                        #[cfg(test)]
+                        if self.refuse_last_saved {
+                            return error(STATUS_UNKNOWN);
+                        }
+                        Setting::LastSavedUserEq(self.last_saved)
+                    }
                     Some(id) => match self
                         .bools
                         .get(&id)
@@ -203,9 +226,17 @@ impl PixelBudsSim {
                 let Some(setting) = setting else {
                     return error(STATUS_INVALID_ARGUMENT);
                 };
+                // Like the real earbuds, a write merges into the stored curve
+                // (missing bands stay as they were), and the change is reported
+                // as the full resulting curve.
+                let setting = match setting {
+                    Setting::CurrentUserEq(bands) => Setting::CurrentUserEq(self.eq.merged(&bands)),
+                    other => other,
+                };
                 match setting {
                     Setting::CurrentAncrState(state) => self.anc = state,
                     Setting::CurrentUserEq(bands) => self.eq = bands,
+                    Setting::LastSavedUserEq(bands) => self.last_saved = bands,
                     ref other => match other.as_bool() {
                         Some((id, on)) => {
                             self.bools.insert(id, on);
