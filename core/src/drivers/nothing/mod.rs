@@ -34,9 +34,9 @@
 //! each model's features. Facts only, no code.
 //!
 //! Confirmed on Ear (open) hardware (a tester, 2026-11): framing and request
-//! CRCs, battery, firmware, EQ presets, the Custom EQ curve, Low Latency and
-//! Dual Connection. Everything else, including the model-ID request and all
-//! other models, is untested.
+//! CRCs, battery, firmware, EQ presets, the Custom EQ curve, Low Latency,
+//! Dual Connection and gesture controls. Everything else, including the
+//! model-ID request and all other models, is untested.
 
 pub(crate) mod models;
 pub(crate) mod sim;

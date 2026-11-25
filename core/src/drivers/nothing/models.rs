@@ -228,6 +228,7 @@ const EAR_3_GESTURES: &[Slot] = both![
     DoubleHold => &[NoiseControl, VolumeUp, VolumeDown, VoiceAssistant, NoAction],
 ];
 
+/// Confirmed on hardware (2026-11).
 const EAR_OPEN_GESTURES: &[Slot] = both![
     Double => &[SkipBack, SkipForward, VoiceAssistant],
     Triple => &[SkipBack, SkipForward, VoiceAssistant],
