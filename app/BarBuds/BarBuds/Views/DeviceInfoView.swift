@@ -11,6 +11,7 @@ struct DeviceInfoView: View {
             if let session = devices.selected {
                 DeviceInfoForm(session: session)
                     .id(session.id)
+                    .navigationTitle("About These \(session.capabilities.formFactor.deviceTitle)")
             } else {
                 ContentUnavailableView("No Earbuds Connected", systemImage: "earbuds")
                     .frame(height: 200)

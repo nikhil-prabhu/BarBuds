@@ -18,6 +18,7 @@ import SwiftUI
         }
         .menuBarExtraStyle(.window)
         
+        // Retitled for headphones by DeviceInfoView.
         Window("About These Earbuds", id: "device-info") {
             DeviceInfoView(devices: devices)
         }

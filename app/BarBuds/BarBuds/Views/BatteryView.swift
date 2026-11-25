@@ -8,8 +8,8 @@ struct BatteryView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // One battery, reported as `left` (see the core's `FormFactor::Headphones`).
-            if formFactor == .headphones {
+            // One battery, reported as `left` (headphones, a neckband).
+            if formFactor.isSingleUnit {
                 BatteryGauge(title: "Battery", systemImage: formFactor.pairSymbol, reading: battery.left)
             } else {
                 earbuds

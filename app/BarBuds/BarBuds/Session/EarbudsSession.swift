@@ -47,6 +47,8 @@ final class EarbudsSession: Identifiable {
         id = device.id
         name = device.name
         controller = BarBudsController(model: device.model)
+        // Lets a driver covering a whole lineup (Nothing) recognise the model.
+        controller.setDeviceName(name: device.name)
         let capabilities = controller.capabilities()
         self.capabilities = capabilities
         state = controller.state()

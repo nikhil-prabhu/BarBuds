@@ -32,13 +32,19 @@ pub fn rfcomm_service_uuid(model: DeviceModel) -> String {
     drivers::rfcomm_service_uuid(model).to_string()
 }
 
+/// Every Nothing and CMF model the `Nothing` driver knows, in display order.
+#[uniffi::export]
+pub fn nothing_models() -> Vec<NothingModelInfo> {
+    drivers::nothing_models()
+}
+
 /// Every device model the core has a driver for.
 #[uniffi::export]
 pub fn supported_models() -> Vec<DeviceModel> {
     vec![
         DeviceModel::PixelBudsPro,
         DeviceModel::PixelBudsASeries,
-        DeviceModel::NothingEarOpen,
+        DeviceModel::Nothing,
         // Last: discovery picks the first match, and every specific model
         // above may also offer Fast Pair.
         DeviceModel::FastPair,

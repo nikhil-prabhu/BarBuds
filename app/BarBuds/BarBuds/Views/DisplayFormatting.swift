@@ -38,12 +38,13 @@ extension FormFactor {
         case .stemless: "earbuds.stemless"
         case .earHook: "earbuds.bone.conduction"
         case .headphones: "headphones"
+        case .neckband: "earbuds"
         }
     }
 
     var leftSymbol: String {
         switch self {
-        case .stemmed: "earbud.left"
+        case .stemmed, .neckband: "earbud.left"
         case .headphones: pairSymbol
         default: pairSymbol + ".left"
         }
@@ -51,16 +52,46 @@ extension FormFactor {
 
     var rightSymbol: String {
         switch self {
-        case .stemmed: "earbud.right"
+        case .stemmed, .neckband: "earbud.right"
         case .headphones: pairSymbol
         default: pairSymbol + ".right"
         }
     }
 
     static let caseSymbol = "earbuds.case.fill"
+
+    /// One piece with one battery, rung as a whole (headphones, a neckband).
+    var isSingleUnit: Bool {
+        self == .headphones || self == .neckband
+    }
+
+    /// For sentences: "earbuds" or "headphones".
+    var deviceNoun: String {
+        self == .headphones ? "headphones" : "earbuds"
+    }
+
+    /// For titles: "Earbuds" or "Headphones".
+    var deviceTitle: String {
+        self == .headphones ? "Headphones" : "Earbuds"
+    }
 }
 
 extension FeatureToggle {
+    /// Worded for the device, e.g. on-head detection for headphones.
+    func title(for formFactor: FormFactor) -> String {
+        switch self {
+        case .inEarDetection where formFactor == .headphones: "On-Head Detection"
+        default: title
+        }
+    }
+
+    func detail(for formFactor: FormFactor) -> String {
+        switch self {
+        case .inEarDetection where formFactor == .headphones: "Pause when you take your headphones off"
+        default: detail
+        }
+    }
+
     var title: String {
         switch self {
         case .inEarDetection: "In-Ear Detection"

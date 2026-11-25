@@ -4,7 +4,8 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::drivers::simulator_for;
+use crate::drivers::{nothing_simulator, simulator_for};
+use crate::error::BarBudsError;
 use crate::model::DeviceModel;
 
 /// The device side of a control channel.
@@ -43,6 +44,19 @@ impl DeviceSimulator {
             model,
             device: Mutex::new(simulator_for(model)),
         })
+    }
+
+    /// A simulated Nothing or CMF device of one model (see `nothing_models()`);
+    /// `new(Nothing)` plays an Ear (open).
+    #[uniffi::constructor]
+    pub fn nothing(model_id: u16) -> Result<Arc<Self>, BarBudsError> {
+        let device = nothing_simulator(model_id).ok_or_else(|| {
+            BarBudsError::invalid_argument(format!("no Nothing model {model_id:#06x}"))
+        })?;
+        Ok(Arc::new(Self {
+            model: DeviceModel::Nothing,
+            device: Mutex::new(device),
+        }))
     }
 
     pub fn model(&self) -> DeviceModel {
@@ -96,6 +110,30 @@ mod tests {
                 assert!(state.toggles.contains_key(toggle), "{model:?}: {toggle:?}");
             }
         }
+    }
+
+    #[test]
+    fn every_nothing_model_can_be_simulated() {
+        let models = crate::nothing_models();
+        assert_eq!(models.len(), 19);
+        assert!(
+            models
+                .iter()
+                .any(|m| m.name == "Nothing Ear (open)" && m.tested)
+        );
+        for info in models {
+            let controller = BarBudsController::new(DeviceModel::Nothing);
+            let device = DeviceSimulator::nothing(info.id).unwrap();
+            let mut outbound = controller.start();
+            while !outbound.is_empty() {
+                controller.feed(device.receive(outbound)).unwrap();
+                outbound = controller.take_outbound();
+            }
+            // Identified by asking: the simulator answers the model ID.
+            assert_eq!(controller.capabilities().display_name, info.name);
+            assert!(controller.state().battery.left.is_some(), "{}", info.name);
+        }
+        assert!(DeviceSimulator::nothing(0x1234).is_err());
     }
 
     #[test]

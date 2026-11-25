@@ -85,9 +85,12 @@ private final class BluetoothMonitor: NSObject {
         )
         let capabilities = BarBudsController(model: model).capabilities()
         let name = device.name ?? capabilities.displayName
-        // Ringing goes over the Fast Pair message stream, a second channel.
+        // Ringing goes over the Fast Pair message stream, a second channel,
+        // so only offer it when the device advertises that service.
         var makeFindTransport: (@Sendable () -> any EarbudsTransport)?
-        if capabilities.canRing {
+        if capabilities.canRing,
+           let fastPairSDP = RFCOMMTransport.sdpUUID(fastPairServiceUuid()),
+           device.getServiceRecord(for: fastPairSDP) != nil {
             let fastPairUUID = fastPairServiceUuid()
             makeFindTransport = { RFCOMMTransport(address: id, serviceUUID: fastPairUUID) }
         }

@@ -10,11 +10,23 @@ pub enum DeviceModel {
     PixelBudsPro,
     /// Google Pixel Buds A-Series.
     PixelBudsASeries,
-    /// Nothing Ear (open), via the Nothing X control protocol.
-    NothingEarOpen,
+    /// Nothing and CMF earbuds and headphones, via the Nothing X control
+    /// protocol; the model is asked for on connect.
+    Nothing,
     /// Any other earbuds or headphones with Google Fast Pair: the basics
     /// (battery, firmware, noise control) over the Fast Pair message stream.
     FastPair,
+}
+
+/// One Nothing or CMF model the `Nothing` driver knows, e.g. for the Debug
+/// menu's simulated devices.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct NothingModelInfo {
+    /// The model ID the earbuds report, e.g. `0xB174`.
+    pub id: u16,
+    pub name: String,
+    /// Confirmed on real hardware.
+    pub tested: bool,
 }
 
 /// Whether BarBuds can change the noise-control mode right now.
@@ -50,6 +62,8 @@ pub enum FormFactor {
     EarHook,
     /// Over- or on-ear headphones: one battery, no case.
     Headphones,
+    /// Earbuds joined by a neckband: one battery, no case.
+    Neckband,
 }
 
 /// An on/off device feature. The UI owns titles and descriptions, so each

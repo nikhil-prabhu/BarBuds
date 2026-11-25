@@ -9,6 +9,8 @@ struct FeatureToggles: View {
     let values: [FeatureToggle: Bool]
     @Binding var isExpanded: Bool
     let onSet: (FeatureToggle, Bool) -> Void
+    /// For wording, e.g. "On-Head Detection" on headphones.
+    var formFactor: FormFactor = .stemless
 
     var body: some View {
         CollapsibleSection(title: "Settings", summary: summary, isExpanded: $isExpanded) {
@@ -30,8 +32,8 @@ struct FeatureToggles: View {
             set: { onSet(toggle, $0) }
         )) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(toggle.title)
-                Text(toggle.detail)
+                Text(toggle.title(for: formFactor))
+                Text(toggle.detail(for: formFactor))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

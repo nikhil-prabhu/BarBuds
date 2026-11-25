@@ -1,5 +1,6 @@
-//! Nothing Ear (open), via the Nothing X control protocol shared by Nothing
-//! and CMF earbuds.
+//! Nothing and CMF earbuds and headphones, via the Nothing X control
+//! protocol they share. Which model is connected is asked for on connect
+//! (see [`models`]); until it answers, only the basics are shown.
 //!
 //! The control channel is RFCOMM, advertised under [`SERVICE_UUID`]. Every
 //! frame, in both directions (multi-byte fields little-endian):
@@ -13,22 +14,31 @@
 //!   unsolicited notification.
 //!
 //! Received CRCs are not checked: models differ in what they checksum (CMF
-//! Buds Pro 2 cover only the payload), the Ear (open)'s scheme is unconfirmed,
-//! and RFCOMM already guarantees integrity. Gadgetbridge, widely used with
-//! Nothing earbuds, doesn't check them either.
+//! Buds Pro 2 cover only the payload), and RFCOMM already guarantees
+//! integrity. Gadgetbridge, widely used with Nothing earbuds, doesn't check
+//! them either.
 //!
-//! Protocol facts come from Gadgetbridge (AGPL-3.0; facts only, no code) and
-//! EarA-linux (GPL-3.0, <https://github.com/oneydef/EarA-linux>), whose Ear
-//! (open) profile lists no ANC and no in-ear detection, and EQ presets
-//! Balanced, More Bass, More Treble and Voice plus Custom.
+//! On connect BarBuds sends the requests a real Ear (open) is known to handle
+//! (battery, firmware, EQ). The model comes from the Bluetooth name when it's
+//! the factory one; otherwise, once the EQ reply arrives, BarBuds asks for
+//! the model ID (BudsLink falls back the other way round, after 2 seconds,
+//! which suggests some models don't answer). Then it reads that model's other
+//! settings one at a time: each answer (or rejection) sends the next, so a
+//! request a model ignores only stops the reads after it.
+//!
+//! Sources: Gadgetbridge (AGPL-3.0) and EarA-linux (GPL-3.0,
+//! <https://github.com/oneydef/EarA-linux>) for the framing, battery, EQ and
+//! the Custom EQ encoding; BudsLink (GPL-3.0,
+//! <https://github.com/maniacx/BudsLink>) for preset codes, noise control,
+//! in-ear detection, Dual Connection, gestures, model IDs and each model's
+//! features. Facts only, no code.
 //!
 //! Confirmed on Ear (open) hardware (a tester, 2026-11): framing and request
-//! CRCs, battery, firmware, EQ presets (codes from BudsLink, GPL-3.0,
-//! <https://github.com/maniacx/BudsLink>; facts only) and low-latency mode.
-//! Also confirmed: the Custom EQ curve (EarA-linux's encoding) and Dual
-//! Connection (BudsLink's commands). Not yet confirmed: gesture controls
-//! (BudsLink's Ear (open) table).
+//! CRCs, battery, firmware, EQ presets, the Custom EQ curve, Low Latency and
+//! Dual Connection. Everything else, including the model-ID request and all
+//! other models, is untested.
 
+pub(crate) mod models;
 pub(crate) mod sim;
 
 use crate::driver::{Decoded, EarbudDriver, Event};
@@ -38,6 +48,7 @@ use crate::model::{
     ControlCapabilities, ControlGesture, ControlInput, ControlSetting, ControlSlot,
     DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle, FormFactor,
 };
+use models::NothingModel;
 
 /// RFCOMM service UUID of the Nothing X control channel (all Nothing/CMF models).
 pub(crate) const SERVICE_UUID: &str = "aeac4a03-dff5-498f-843a-34487cf133eb";
@@ -65,11 +76,28 @@ mod direction {
 mod command {
     /// Battery notification (unsolicited).
     pub const BATTERY_NOTIFY: u8 = 0x01;
+    /// Noise-control notification (direction `0xE0`; shares its code with
+    /// the gestures set, direction `0xF0`).
+    pub const ANC_NOTIFY: u8 = 0x03;
+    /// In-ear detection: set `[1, 1, on]`.
+    pub const IN_EAR_SET: u8 = 0x04;
     /// Lines of `component,type,value`; type 4 is the serial number.
     pub const DEVICE_INFO: u8 = 0x06;
     pub const BATTERY: u8 = 0x07;
+    /// In-ear detection: the reply's third byte is 1 when on.
+    pub const IN_EAR_GET: u8 = 0x0E;
+    /// Noise control: set `[1, mode, 0]`.
+    pub const ANC_SET: u8 = 0x0F;
     pub const EQ_SET: u8 = 0x10;
+    /// The model ID, e.g. `[0x74, 0xB1]` for `0xB174`.
+    pub const MODEL_ID: u8 = 0x1C;
+    /// EQ presets on CMF earbuds: set `[code, 0]`.
+    pub const LISTENING_SET: u8 = 0x1D;
+    /// Noise control: `[kind, value, 0]` triples, kind 1 being the mode.
+    pub const ANC_GET: u8 = 0x1E;
     pub const EQ_GET: u8 = 0x1F;
+    /// CMF earbuds may report their preset under this code.
+    pub const LISTENING_GET: u8 = 0x50;
     /// Low-latency ("Low Lag") mode: set `[1 = on / 2 = off, 0]`.
     pub const LATENCY_SET: u8 = 0x40;
     /// Low-latency mode: the reply's first byte is 1 when on.
@@ -91,39 +119,31 @@ mod command {
     pub const GESTURES_SET: u8 = 0x03;
 }
 
-/// The Ear (open)'s only button, on each bud.
+/// The button on each bud that the gestures belong to.
 const GESTURE_BUTTON: u8 = 0x01;
 
-/// Gesture wire codes, from BudsLink's Ear (open) table.
-const GESTURES: [(ControlGesture, u8); 4] = [
+/// Gesture wire codes (BudsLink's).
+const GESTURES: [(ControlGesture, u8); 5] = [
+    (ControlGesture::Single, 0x01),
     (ControlGesture::Double, 0x02),
     (ControlGesture::Triple, 0x03),
     (ControlGesture::Hold, 0x07),
     (ControlGesture::DoubleHold, 0x09),
 ];
 
-/// Action wire codes, from BudsLink's Nothing table.
-const ACTIONS: [(ControlAction, u8); 6] = [
+/// Action wire codes (BudsLink's). Noise control is sent as `0x0A`; models
+/// also report `0x14`–`0x16` for it (variants of which modes it cycles).
+const ACTIONS: [(ControlAction, u8); 8] = [
     (ControlAction::NoAction, 0x01),
+    (ControlAction::PlayPause, 0x02),
     (ControlAction::SkipBack, 0x08),
     (ControlAction::SkipForward, 0x09),
+    (ControlAction::NoiseControl, 0x0A),
     (ControlAction::VoiceAssistant, 0x0B),
     (ControlAction::VolumeUp, 0x12),
     (ControlAction::VolumeDown, 0x13),
 ];
-
-/// The actions the Nothing X app offers for each gesture (BudsLink's table).
-fn gesture_actions(gesture: ControlGesture) -> Vec<ControlAction> {
-    use ControlAction::*;
-    match gesture {
-        ControlGesture::Double | ControlGesture::Triple => {
-            vec![SkipBack, SkipForward, VoiceAssistant]
-        }
-        ControlGesture::Hold => vec![VolumeUp, VolumeDown, VoiceAssistant],
-        ControlGesture::DoubleHold => vec![VolumeUp, VolumeDown, VoiceAssistant, NoAction],
-        ControlGesture::Single => vec![],
-    }
-}
+const NOISE_CONTROL_VARIANTS: [u8; 3] = [0x14, 0x15, 0x16];
 
 fn gesture_code(gesture: ControlGesture) -> Option<u8> {
     GESTURES
@@ -136,6 +156,13 @@ fn action_code(action: ControlAction) -> Option<u8> {
     ACTIONS.iter().find(|&&(a, _)| a == action).map(|&(_, c)| c)
 }
 
+fn action_for(code: u8) -> Option<ControlAction> {
+    if NOISE_CONTROL_VARIANTS.contains(&code) {
+        return Some(ControlAction::NoiseControl);
+    }
+    ACTIONS.iter().find(|&&(_, c)| c == code).map(|&(a, _)| a)
+}
+
 fn side_code(side: BudSide) -> u8 {
     match side {
         BudSide::Left => component::LEFT,
@@ -143,7 +170,8 @@ fn side_code(side: BudSide) -> u8 {
     }
 }
 
-/// Gesture settings from a reply; entries BarBuds doesn't know are skipped.
+/// Gesture settings from a reply; entries BarBuds doesn't know (other
+/// buttons, headphone controls, other actions) are skipped.
 pub(crate) fn gesture_settings(payload: &[u8]) -> Result<Vec<ControlSetting>, BarBudsError> {
     let (&count, entries) = payload
         .split_first()
@@ -159,12 +187,14 @@ pub(crate) fn gesture_settings(payload: &[u8]) -> Result<Vec<ControlSetting>, Ba
                 component::RIGHT => BudSide::Right,
                 _ => return None,
             };
+            if entry[1] != GESTURE_BUTTON {
+                return None;
+            }
             let gesture = GESTURES.iter().find(|&&(_, c)| c == entry[2])?.0;
-            let action = ACTIONS.iter().find(|&&(_, c)| c == entry[3])?.0;
             Some(ControlSetting {
                 side,
                 gesture,
-                action,
+                action: action_for(entry[3])?,
             })
         })
         .collect())
@@ -185,24 +215,15 @@ const INFO_TYPE_SERIAL: &str = "4";
 
 /// Battery component IDs.
 mod component {
-    /// One level for both buds.
+    /// One level for both buds, or the only battery of headphones.
     pub const BOTH: u8 = 0x01;
     pub const LEFT: u8 = 0x02;
     pub const RIGHT: u8 = 0x03;
     pub const CASE: u8 = 0x04;
 }
 
-/// The Ear (open)'s presets as the Nothing X app names them: `(id, name,
-/// wire code)`, as in BudsLink. Confirmed on hardware (2026-11): Balanced,
-/// Voice, More Treble and More Bass each select the same preset in the app
-/// (EarA-linux's table, which swaps 1 and 3, does not).
-pub(crate) const PRESETS: [(&str, &str, u8); 4] = [
-    ("balanced", "Balanced", 0),
-    ("more-bass", "More Bass", 3),
-    ("more-treble", "More Treble", 2),
-    ("voice", "Voice", 1),
-];
-/// Wire code of the Custom curve (BudsLink's), shown as the sliders.
+/// Wire code of the Nothing Custom curve, shown as sliders on models with
+/// `custom_sliders` (the Ear (open)).
 pub(crate) const CUSTOM_CODE: u8 = 5;
 
 /// Custom EQ bands as shown, Bass, Mid, Treble (dB).
@@ -257,6 +278,17 @@ pub(crate) fn custom_eq_gains(payload: &[u8]) -> Result<[f32; 3], BarBudsError> 
         gain(GAIN_OFFSETS[2])?,
     ];
     Ok([bass, mid, treble])
+}
+
+/// The noise-control mode in an ANC reply or notification: the value of the
+/// `[kind, value, 0]` triple with kind 1, as EarA-linux reads it, else the
+/// second byte, as BudsLink does.
+fn anc_code(payload: &[u8]) -> Option<u8> {
+    payload
+        .chunks(3)
+        .find(|triple| triple.len() >= 2 && triple[0] == 1)
+        .map(|triple| triple[1])
+        .or_else(|| payload.get(1).copied())
 }
 
 /// CRC-16/MODBUS: reflected polynomial 0xA001, initial value 0xFFFF.
@@ -345,42 +377,93 @@ fn serial_numbers(payload: &[u8]) -> ComponentStrings {
     serials
 }
 
-pub(crate) struct NothingEarOpenDriver {
+/// What the model-ID request found out.
+#[derive(Debug, Clone, Copy)]
+enum Identity {
+    /// Not answered yet.
+    Asking,
+    Known(&'static NothingModel),
+    /// An ID BarBuds doesn't know, or no answer: only the basics.
+    Unknown,
+}
+
+pub(crate) struct NothingDriver {
     /// Frame sequence number, as the Nothing X app sends.
     sequence: u8,
     /// Settings sent but not yet acknowledged, oldest first: the set
     /// command and the state change its acknowledgement confirms.
     pending: std::collections::VecDeque<(u8, Event)>,
-    /// Reads sent after the start-up replies, one at a time (see `start`).
+    /// Reads sent after the start-up replies, one at a time (see the module docs).
     follow_ups: std::collections::VecDeque<u8>,
     /// The follow-up read awaiting an answer.
     awaiting: Option<u8>,
+    identity: Identity,
+    /// The EQ code last reported, kept until the model is known.
+    eq_code: Option<u8>,
     /// The active preset's ID, `None` for the Custom curve.
     preset: Option<String>,
     /// The Custom curve: Bass, Mid, Treble.
     custom_gains: [f32; 3],
+    /// The Noise Cancelling strength last reported, reused when switching
+    /// back to Noise Cancelling.
+    cancelling_code: Option<u8>,
+    /// The model the Bluetooth name gave, kept across `start()`.
+    named_model: Option<&'static NothingModel>,
 }
 
-impl Default for NothingEarOpenDriver {
+impl Default for NothingDriver {
     fn default() -> Self {
         Self {
             sequence: 1,
             pending: Default::default(),
             follow_ups: Default::default(),
             awaiting: None,
+            identity: Identity::Asking,
+            eq_code: None,
             preset: None,
             custom_gains: [0.0; 3],
+            cancelling_code: None,
+            named_model: None,
         }
     }
 }
 
-impl NothingEarOpenDriver {
+impl NothingDriver {
+    fn model(&self) -> Option<&'static NothingModel> {
+        match self.identity {
+            Identity::Known(model) => Some(model),
+            _ => None,
+        }
+    }
+
     fn frame(&mut self, direction: u8, command: u8, payload: &[u8]) -> Vec<u8> {
         let sequence = self.sequence;
         // Gadgetbridge wraps before 0xFD; keep to the same range.
         self.sequence = if sequence >= 0xFC { 1 } else { sequence + 1 };
         let command = u16::from_le_bytes([command, direction]);
         encode_frame(HOST_CONTROL, command, sequence, payload)
+    }
+
+    /// Records the model (or that it's unknown) and queues its reads.
+    fn identify(&mut self, identity: Identity) {
+        self.identity = identity;
+        // Low Latency is common to every model.
+        self.follow_ups.push_back(command::LATENCY_GET);
+        if let Identity::Known(model) = identity {
+            let reads = [
+                (model.dual_connection, command::DUAL_GET),
+                (model.in_ear_detection, command::IN_EAR_GET),
+                (model.anc.is_some(), command::ANC_GET),
+                (model.custom_sliders, command::CUSTOM_EQ_GET),
+                (!model.gestures.is_empty(), command::GESTURES_GET),
+            ];
+            self.follow_ups.extend(
+                reads
+                    .into_iter()
+                    .filter(|&(on, _)| on)
+                    .map(|(_, read)| read),
+            );
+        }
     }
 
     /// The change confirmed by an acknowledgement of `command`, if one is waiting.
@@ -396,16 +479,36 @@ impl NothingEarOpenDriver {
         Some(event)
     }
 
-    /// The EQ as shown: the active preset, and the Custom curve's sliders.
+    /// The EQ as shown: the active preset, and on models with sliders the
+    /// Custom curve.
     fn eq(&self, preset: Option<String>) -> EqSettings {
+        let sliders = self.model().is_some_and(|m| m.custom_sliders);
         EqSettings {
             preset,
-            gains: self.custom_gains.to_vec(),
+            gains: if sliders {
+                self.custom_gains.to_vec()
+            } else {
+                vec![]
+            },
         }
     }
 
-    fn preset_eq(&self, id: &str) -> EqSettings {
-        self.eq(Some(id.to_string()))
+    /// The EQ event for the last reported code, once the model is known.
+    fn eq_event(&mut self) -> Result<Option<Event>, BarBudsError> {
+        let (Some(model), Some(code)) = (self.model(), self.eq_code) else {
+            return Ok(None);
+        };
+        self.preset = if model.custom_sliders && code == CUSTOM_CODE {
+            None
+        } else {
+            let &(id, _, _) = model
+                .presets
+                .iter()
+                .find(|&&(_, _, c)| c == code)
+                .ok_or_else(|| BarBudsError::malformed(format!("unknown EQ preset {code}")))?;
+            Some(id.to_string())
+        };
+        Ok(Some(Event::Eq(self.eq(self.preset.clone()))))
     }
 
     /// Sends the next follow-up read once the previous one was answered.
@@ -421,6 +524,20 @@ impl NothingEarOpenDriver {
     fn set(&mut self, command: u8, payload: &[u8], confirms: Event) -> Vec<u8> {
         self.pending.push_back((command, confirms));
         self.frame(direction::SET, command, payload)
+    }
+
+    fn anc_mode(&mut self, code: u8) -> Option<AncMode> {
+        let anc = self.model()?.anc?;
+        if code == anc.off {
+            Some(AncMode::Off)
+        } else if Some(code) == anc.transparency {
+            Some(AncMode::Transparency)
+        } else if anc.cancelling.contains(&code) {
+            self.cancelling_code = Some(code);
+            Some(AncMode::NoiseCancelling)
+        } else {
+            None
+        }
     }
 
     fn handle(
@@ -453,23 +570,36 @@ impl NothingEarOpenDriver {
                     charging_case: version,
                 })))
             }
-            (direction::REPLY, command::EQ_GET) => {
+            (direction::REPLY, command::MODEL_ID) => {
+                let &[low, high, ..] = payload else {
+                    self.identify(Identity::Unknown);
+                    return Err(BarBudsError::malformed("short model ID"));
+                };
+                let id = u16::from_le_bytes([low, high]);
+                self.identify(models::model(id).map_or(Identity::Unknown, Identity::Known));
+                // The EQ code may have arrived before the model was known.
+                self.eq_event()
+            }
+            (direction::REPLY, command::EQ_GET | command::LISTENING_GET) => {
                 let &code = payload
                     .first()
                     .ok_or_else(|| BarBudsError::malformed("empty EQ payload"))?;
-                self.preset = if code == CUSTOM_CODE {
-                    None
-                } else {
-                    let &(id, _, _) =
-                        PRESETS
-                            .iter()
-                            .find(|&&(_, _, c)| c == code)
-                            .ok_or_else(|| {
-                                BarBudsError::malformed(format!("unknown EQ preset {code}"))
-                            })?;
-                    Some(id.to_string())
-                };
-                Ok(Some(Event::Eq(self.eq(self.preset.clone()))))
+                self.eq_code = Some(code);
+                self.eq_event()
+            }
+            (direction::REPLY, command::ANC_GET) | (direction::NOTIFY_ALT, command::ANC_NOTIFY) => {
+                let code = anc_code(payload)
+                    .ok_or_else(|| BarBudsError::malformed("empty noise-control payload"))?;
+                Ok(Some(Event::Anc(self.anc_mode(code))))
+            }
+            (direction::REPLY, command::IN_EAR_GET) => {
+                let &value = payload
+                    .get(2)
+                    .ok_or_else(|| BarBudsError::malformed("short in-ear payload"))?;
+                Ok(Some(Event::Toggle(
+                    FeatureToggle::InEarDetection,
+                    value == 1,
+                )))
             }
             (direction::REPLY, command::GESTURES_GET) => {
                 let settings = gesture_settings(payload)?;
@@ -505,19 +635,71 @@ impl NothingEarOpenDriver {
     }
 }
 
-impl EarbudDriver for NothingEarOpenDriver {
+impl EarbudDriver for NothingDriver {
     fn capabilities(&self) -> DeviceCapabilities {
+        let Some(model) = self.model() else {
+            // Until (or unless) the model is known: the basics.
+            return DeviceCapabilities {
+                display_name: "Nothing".to_string(),
+                anc_modes: vec![],
+                eq: None,
+                has_charging_case: true,
+                form_factor: FormFactor::StemmedInEar,
+                toggles: if matches!(self.identity, Identity::Unknown) {
+                    vec![FeatureToggle::LowLatency]
+                } else {
+                    vec![]
+                },
+                can_ring: true,
+                has_balance: false,
+                anc_cycle_modes: vec![],
+                controls: None,
+            };
+        };
+        let anc_modes = model.anc.map_or(vec![], |anc| {
+            let mut modes = vec![AncMode::Off, AncMode::NoiseCancelling];
+            if anc.transparency.is_some() {
+                modes.push(AncMode::Transparency);
+            }
+            modes
+        });
+        let toggles = [
+            (model.in_ear_detection, FeatureToggle::InEarDetection),
+            (model.dual_connection, FeatureToggle::Multipoint),
+            (true, FeatureToggle::LowLatency),
+        ]
+        .into_iter()
+        .filter(|&(on, _)| on)
+        .map(|(_, toggle)| toggle)
+        .collect();
+        let controls = (!model.gestures.is_empty()).then(|| ControlCapabilities {
+            input: ControlInput::Pinch,
+            slots: model
+                .gestures
+                .iter()
+                .map(|slot| ControlSlot {
+                    side: slot.side,
+                    gesture: slot.gesture,
+                    actions: slot.actions.to_vec(),
+                })
+                .collect(),
+        });
+        let bands = if model.custom_sliders {
+            BAND_LABELS.iter().map(|l| l.to_string()).collect()
+        } else {
+            vec![]
+        };
         DeviceCapabilities {
-            display_name: "Nothing Ear (open)".to_string(),
-            anc_modes: vec![],
+            display_name: model.name.to_string(),
+            anc_modes,
             eq: Some(EqCapabilities {
-                // The sliders are the Custom curve ("Custom" in the picker).
-                band_labels: BAND_LABELS.iter().map(|l| l.to_string()).collect(),
+                band_labels: bands,
                 unit: EqUnit::Decibels,
                 min_gain: -MAX_GAIN,
                 max_gain: MAX_GAIN,
                 step: 0.5,
-                presets: PRESETS
+                presets: model
+                    .presets
                     .iter()
                     .map(|&(id, name, _)| EqPreset {
                         id: id.to_string(),
@@ -525,40 +707,33 @@ impl EarbudDriver for NothingEarOpenDriver {
                     })
                     .collect(),
             }),
-            has_charging_case: true,
-            form_factor: FormFactor::EarHook,
-            toggles: vec![FeatureToggle::Multipoint, FeatureToggle::LowLatency],
-            // Confirmed on hardware: the Ear (open) accepts the Fast Pair ring.
+            has_charging_case: !model.single_battery,
+            form_factor: model.form_factor,
+            toggles,
+            // Over the Fast Pair channel; confirmed on the Ear (open).
             can_ring: true,
             has_balance: false,
             anc_cycle_modes: vec![],
-            controls: Some(ControlCapabilities {
-                input: ControlInput::Pinch,
-                slots: [BudSide::Left, BudSide::Right]
-                    .into_iter()
-                    .flat_map(|side| {
-                        GESTURES.iter().map(move |&(gesture, _)| ControlSlot {
-                            side,
-                            gesture,
-                            actions: gesture_actions(gesture),
-                        })
-                    })
-                    .collect(),
-            }),
+            controls,
         }
     }
 
+    fn set_device_name(&mut self, name: &str) {
+        self.named_model = models::model_for_name(name);
+    }
+
     fn start(&mut self) -> Vec<u8> {
-        *self = Self::default();
-        // What a real Ear (open) is known to handle at connect time. Other
-        // reads follow one at a time once the EQ reply arrives, so they
-        // can't disturb these.
-        self.follow_ups.extend([
-            command::LATENCY_GET,
-            command::DUAL_GET,
-            command::CUSTOM_EQ_GET,
-            command::GESTURES_GET,
-        ]);
+        *self = Self {
+            named_model: self.named_model,
+            ..Self::default()
+        };
+        // What a real Ear (open) is known to handle at connect time; the
+        // model's reads (and the model ID, unless the name gave the model)
+        // follow the EQ reply.
+        match self.named_model {
+            Some(model) => self.identify(Identity::Known(model)),
+            None => self.follow_ups.push_back(command::MODEL_ID),
+        }
         [command::BATTERY, command::FIRMWARE, command::EQ_GET]
             .into_iter()
             .flat_map(|cmd| self.frame(direction::GET, cmd, &[]))
@@ -601,13 +776,10 @@ impl EarbudDriver for NothingEarOpenDriver {
         let payload = &buf[HEADER_LEN..HEADER_LEN + len];
         // The EQ reply starts the follow-up reads; each answer (or
         // rejection) of one sends the next.
-        if direction == direction::REPLY
-            && (command == command::EQ_GET || Some(command) == self.awaiting)
-        {
-            if Some(command) == self.awaiting {
-                self.awaiting = None;
-            }
-            self.send_follow_up(outbound);
+        let answered = direction == direction::REPLY
+            && (command == command::EQ_GET || Some(command) == self.awaiting);
+        if answered && Some(command) == self.awaiting {
+            self.awaiting = None;
         }
         let result = match control & CONTROL_ERROR {
             0 => self.handle(direction, command, payload),
@@ -615,12 +787,19 @@ impl EarbudDriver for NothingEarOpenDriver {
                 if direction == direction::ACK {
                     self.take_pending(command);
                 }
+                if direction == direction::REPLY && command == command::MODEL_ID {
+                    self.identify(Identity::Unknown);
+                }
                 Err(BarBudsError::device(format!(
                     "earbuds rejected command {:#04x} (error {code})",
                     command
                 )))
             }
         };
+        // After handling: a model-ID reply queues that model's reads.
+        if answered {
+            self.send_follow_up(outbound);
+        }
         Some(Decoded {
             consumed: total,
             result,
@@ -628,13 +807,40 @@ impl EarbudDriver for NothingEarOpenDriver {
     }
 
     fn encode_anc(&mut self, mode: AncMode) -> Result<Vec<u8>, BarBudsError> {
-        Err(BarBudsError::Unsupported {
-            feature: format!("ANC mode {mode:?}"),
-        })
+        let anc = self
+            .model()
+            .and_then(|m| m.anc)
+            .ok_or_else(|| BarBudsError::Unsupported {
+                feature: format!("ANC mode {mode:?}"),
+            })?;
+        let code = match mode {
+            AncMode::Off => anc.off,
+            AncMode::Transparency => anc.transparency.ok_or_else(|| BarBudsError::Unsupported {
+                feature: "transparency".to_string(),
+            })?,
+            // The strength the buds last used, else the model's default.
+            AncMode::NoiseCancelling => self
+                .cancelling_code
+                .filter(|c| anc.cancelling.contains(c))
+                .unwrap_or(anc.cancelling[0]),
+        };
+        Ok(self.set(
+            command::ANC_SET,
+            &[0x01, code, 0x00],
+            Event::Anc(Some(mode)),
+        ))
     }
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
+        let model = self.model().ok_or_else(|| BarBudsError::Unsupported {
+            feature: "EQ".to_string(),
+        })?;
         let Some(preset) = &eq.preset else {
+            if !model.custom_sliders {
+                return Err(BarBudsError::Unsupported {
+                    feature: "a custom EQ curve".to_string(),
+                });
+            }
             // The Custom curve: select it if needed, then write it.
             let gains = <[f32; 3]>::try_from(eq.gains.as_slice()).map_err(|_| {
                 BarBudsError::invalid_argument(format!("{} EQ gains, expected 3", eq.gains.len()))
@@ -655,15 +861,22 @@ impl EarbudDriver for NothingEarOpenDriver {
             frames.extend(self.set(command::CUSTOM_EQ_SET, &custom_eq_payload(gains), confirms));
             return Ok(frames);
         };
-        let &(id, _, code) = PRESETS
+        let &(id, _, code) = model
+            .presets
             .iter()
             .find(|&&(id, _, _)| preset == id)
             .ok_or_else(|| BarBudsError::Unsupported {
                 feature: format!("EQ preset {preset:?}"),
             })?;
-        let confirms = Event::Eq(self.preset_eq(id));
-        Ok(self.set(command::EQ_SET, &[code, 0x00], confirms))
+        let set = if model.listening_mode {
+            command::LISTENING_SET
+        } else {
+            command::EQ_SET
+        };
+        let confirms = Event::Eq(self.eq(Some(id.to_string())));
+        Ok(self.set(set, &[code, 0x00], confirms))
     }
+
     fn encode_control(&mut self, setting: ControlSetting) -> Result<Vec<u8>, BarBudsError> {
         let entry = gesture_entry(setting).ok_or_else(|| BarBudsError::Unsupported {
             feature: format!("{setting:?}"),
@@ -692,6 +905,11 @@ impl EarbudDriver for NothingEarOpenDriver {
                 &[u8::from(on)],
                 Event::Toggle(toggle, on),
             )),
+            FeatureToggle::InEarDetection => Ok(self.set(
+                command::IN_EAR_SET,
+                &[0x01, 0x01, u8::from(on)],
+                Event::Toggle(toggle, on),
+            )),
             _ => Err(BarBudsError::Unsupported {
                 feature: format!("{toggle:?}"),
             }),
@@ -704,6 +922,33 @@ mod tests {
     use super::*;
     use crate::controller::BarBudsController;
     use crate::model::DeviceModel;
+
+    const EAR_OPEN: u16 = 0xB174;
+
+    /// A controller for `id` that has answered the model-ID request (its
+    /// follow-up reads are queued, not sent).
+    fn identified(id: u16) -> std::sync::Arc<BarBudsController> {
+        let controller = BarBudsController::new(DeviceModel::Nothing);
+        controller
+            .feed(reply(
+                direction::REPLY,
+                command::MODEL_ID,
+                &id.to_le_bytes(),
+            ))
+            .unwrap();
+        controller
+    }
+
+    fn ear_open() -> std::sync::Arc<BarBudsController> {
+        identified(EAR_OPEN)
+    }
+
+    fn ear_open_driver() -> NothingDriver {
+        NothingDriver {
+            identity: Identity::Known(models::model(EAR_OPEN).unwrap()),
+            ..Default::default()
+        }
+    }
 
     fn preset_eq(id: &str) -> EqSettings {
         EqSettings {
@@ -754,7 +999,7 @@ mod tests {
     fn decodes_captured_battery_reply() {
         // Captured from CMF Buds Pro 2 (EarA-linux tests): left and right 95%.
         // Its CRC covers only the payload, which must not stop it decoding.
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         controller
             .feed(hex("55 60 01 07 40 05 00 02 02 02 5f 03 5f 2c a2"))
             .unwrap();
@@ -796,7 +1041,7 @@ mod tests {
 
     #[test]
     fn start_requests_battery_firmware_and_eq() {
-        let mut driver = NothingEarOpenDriver::default();
+        let mut driver = ear_open_driver();
         let frames = driver.start();
         assert_eq!(&frames[..8], &hex("55 60 01 07 c0 00 00 01")[..]);
         assert_eq!(frames.len(), 3 * (HEADER_LEN + CRC_LEN));
@@ -805,8 +1050,8 @@ mod tests {
     }
 
     #[test]
-    fn low_latency_is_requested_after_the_eq_reply() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+    fn the_model_is_asked_for_after_the_eq_reply() {
+        let controller = BarBudsController::new(DeviceModel::Nothing);
         controller.start();
         controller
             .feed(reply(direction::REPLY, command::BATTERY, &[0]))
@@ -816,13 +1061,28 @@ mod tests {
             .feed(reply(direction::REPLY, command::EQ_GET, &[3, 0]))
             .unwrap();
         let request = controller.take_outbound();
-        assert_eq!(request[3..5], [command::LATENCY_GET, direction::GET]);
+        assert_eq!(request[3..5], [command::MODEL_ID, direction::GET]);
         assert_eq!(request[7], 4); // sequence: after the three start-up requests
+        // Presets aren't known until the model is.
+        assert_eq!(controller.state().eq, None);
+        assert_eq!(controller.capabilities().display_name, "Nothing");
         // Only once, even if the EQ is reported again.
         controller
             .feed(reply(direction::REPLY, command::EQ_GET, &[3, 0]))
             .unwrap();
         assert!(controller.take_outbound().is_empty());
+
+        // The answer names the model, shows the EQ reported earlier and
+        // starts the model's own reads.
+        controller
+            .feed(reply(direction::REPLY, command::MODEL_ID, &[0x74, 0xB1]))
+            .unwrap();
+        assert_eq!(controller.capabilities().display_name, "Nothing Ear (open)");
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("more-bass")
+        );
+        assert_eq!(controller.take_outbound()[3], command::LATENCY_GET);
         controller
             .feed(reply(direction::REPLY, command::LATENCY_GET, &[1]))
             .unwrap();
@@ -833,16 +1093,19 @@ mod tests {
     fn tester_capture_codes() {
         // From a real Ear (open) (firmware 1.0.1.28): the EQ reply carried 3,
         // which the Nothing X app showed as More Bass.
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = BarBudsController::new(DeviceModel::Nothing);
         controller.start();
         controller
             .feed(hex("55 60 01 1f 40 01 00 03 03 9d e6"))
+            .unwrap();
+        controller
+            .feed(reply(direction::REPLY, command::MODEL_ID, &[0x74, 0xB1]))
             .unwrap();
         assert_eq!(
             controller.state().eq.unwrap().preset.as_deref(),
             Some("more-bass")
         );
-        // Its acknowledgement of a preset change, sequence 4, no error.
+        // Its acknowledgement of a preset change, no error.
         controller.encode_eq(preset_eq("voice")).unwrap();
         controller
             .feed(hex("55 60 01 10 70 00 00 04 3e 1f"))
@@ -855,10 +1118,13 @@ mod tests {
 
     #[test]
     fn eq_preset_applies_after_acknowledgement() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = BarBudsController::new(DeviceModel::Nothing);
         controller.start();
         controller
             .feed(reply(direction::REPLY, command::EQ_GET, &[0]))
+            .unwrap();
+        controller
+            .feed(reply(direction::REPLY, command::MODEL_ID, &[0x74, 0xB1]))
             .unwrap();
         assert_eq!(
             controller.state().eq.unwrap().preset.as_deref(),
@@ -866,9 +1132,9 @@ mod tests {
         );
 
         let frame = controller.encode_eq(preset_eq("more-bass")).unwrap();
-        // Set EQ, More Bass (3), sequence 5 (after the three start-up
-        // requests and the low-latency request).
-        assert_eq!(frame[..10], hex("55 60 01 10 f0 02 00 05 03 00")[..]);
+        // Set EQ, More Bass (3), sequence 6 (after the three start-up
+        // requests, the model ID and the low-latency request).
+        assert_eq!(frame[..10], hex("55 60 01 10 f0 02 00 06 03 00")[..]);
         assert_eq!(
             controller.state().eq.unwrap().preset.as_deref(),
             Some("balanced")
@@ -884,7 +1150,7 @@ mod tests {
 
     #[test]
     fn rejected_eq_keeps_state() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         controller
             .feed(reply(direction::REPLY, command::EQ_GET, &[2]))
             .unwrap();
@@ -903,7 +1169,7 @@ mod tests {
 
     #[test]
     fn firmware_version() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         controller
             .feed(reply(direction::REPLY, command::FIRMWARE, b"1.0.2.3\0"))
             .unwrap();
@@ -915,7 +1181,7 @@ mod tests {
 
     #[test]
     fn handles_split_frames_and_garbage() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         // Garbage before a frame is skipped and reported once...
         assert!(controller.feed(vec![0x00, 0x13]).is_err());
         // ...and a frame split into single bytes still decodes.
@@ -935,7 +1201,7 @@ mod tests {
 
     /// Feeds one frame to the driver directly (Low Lag Mode isn't in the
     /// capabilities, so the controller would refuse it).
-    fn driver_feed(driver: &mut NothingEarOpenDriver, frame: &[u8]) -> Option<Event> {
+    fn driver_feed(driver: &mut NothingDriver, frame: &[u8]) -> Option<Event> {
         driver
             .parse_frame(frame, &mut Vec::new())
             .unwrap()
@@ -945,7 +1211,7 @@ mod tests {
 
     #[test]
     fn low_latency_encoding() {
-        let mut driver = NothingEarOpenDriver::default();
+        let mut driver = ear_open_driver();
         assert!(matches!(
             driver_feed(
                 &mut driver,
@@ -974,7 +1240,7 @@ mod tests {
 
     #[test]
     fn acknowledgements_confirm_the_matching_setting() {
-        let mut driver = NothingEarOpenDriver::default();
+        let mut driver = ear_open_driver();
         driver.encode_eq(&preset_eq("voice")).unwrap();
         driver
             .encode_toggle(FeatureToggle::LowLatency, true)
@@ -997,7 +1263,7 @@ mod tests {
     fn serial_numbers_from_device_info() {
         // EarA-linux's documented layout (`component,type,value`, type 4 =
         // serial), with made-up serials.
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         let info = b"2,4,SIMLEFT01\n3,4,SIMRIGHT01\n4,4,SIMCASE01\n2,1,ignored\n";
         controller
             .feed(reply(direction::REPLY, command::DEVICE_INFO, info))
@@ -1010,7 +1276,7 @@ mod tests {
 
     #[test]
     fn nothing_preset_names() {
-        let caps = NothingEarOpenDriver::default().capabilities().eq.unwrap();
+        let caps = ear_open_driver().capabilities().eq.unwrap();
         let names: Vec<_> = caps.presets.iter().map(|p| p.name.as_str()).collect();
         // "Custom" is added by the app for the sliders.
         assert_eq!(names, ["Balanced", "More Bass", "More Treble", "Voice"]);
@@ -1019,7 +1285,7 @@ mod tests {
 
     #[test]
     fn no_anc_and_ear_hook_shape() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         let caps = controller.capabilities();
         assert!(caps.anc_modes.is_empty());
         assert_eq!(caps.form_factor, FormFactor::EarHook);
@@ -1050,11 +1316,12 @@ mod tests {
 
     #[test]
     fn follow_up_reads_go_one_at_a_time() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = BarBudsController::new(DeviceModel::Nothing);
         controller.start();
         let mut sent = Vec::new();
         for (cmd, payload) in [
             (command::EQ_GET, vec![CUSTOM_CODE, 0]),
+            (command::MODEL_ID, vec![0x74, 0xB1]),
             (command::LATENCY_GET, vec![2]),
             (command::DUAL_GET, vec![1]),
             (command::CUSTOM_EQ_GET, custom_eq_payload([1.5, -2.0, 3.0])),
@@ -1070,6 +1337,7 @@ mod tests {
         assert_eq!(
             sent,
             [
+                command::MODEL_ID,
                 command::LATENCY_GET,
                 command::DUAL_GET,
                 command::CUSTOM_EQ_GET,
@@ -1084,12 +1352,16 @@ mod tests {
 
     #[test]
     fn a_rejected_follow_up_moves_on() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = BarBudsController::new(DeviceModel::Nothing);
         controller.start();
         controller
             .feed(reply(direction::REPLY, command::EQ_GET, &[0, 0]))
             .unwrap();
-        controller.take_outbound();
+        controller.take_outbound(); // Model ID
+        controller
+            .feed(reply(direction::REPLY, command::MODEL_ID, &[0x74, 0xB1]))
+            .unwrap();
+        controller.take_outbound(); // Low latency
         let mut rejected = reply(direction::REPLY, command::LATENCY_GET, &[]);
         rejected[1] |= 0x03; // error code 3
         assert!(controller.feed(rejected).is_err());
@@ -1098,7 +1370,7 @@ mod tests {
 
     #[test]
     fn custom_curve_selects_custom_then_writes_it() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         controller
             .feed(reply(direction::REPLY, command::EQ_GET, &[0, 0]))
             .unwrap();
@@ -1126,7 +1398,7 @@ mod tests {
 
     #[test]
     fn presets_keep_the_custom_sliders() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         controller
             .feed(reply(direction::REPLY, command::EQ_GET, &[5, 0]))
             .unwrap();
@@ -1145,7 +1417,7 @@ mod tests {
 
     #[test]
     fn dual_connection_reads_writes_and_follows_notifications() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         let frame = controller
             .encode_toggle(FeatureToggle::Multipoint, false)
             .unwrap();
@@ -1166,7 +1438,7 @@ mod tests {
 
     #[test]
     fn decodes_default_gestures() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         controller
             .feed(reply(
                 direction::REPLY,
@@ -1219,7 +1491,7 @@ mod tests {
 
     #[test]
     fn changing_a_gesture_applies_after_acknowledgement() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         controller
             .feed(reply(
                 direction::REPLY,
@@ -1246,7 +1518,7 @@ mod tests {
 
     #[test]
     fn actions_a_gesture_lacks_are_refused() {
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        let controller = ear_open();
         for setting in [
             // Double pinch can't change the volume.
             (
@@ -1272,5 +1544,359 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    /// Connects a controller to a simulated `model`, running every follow-up read.
+    fn connect_to(
+        model: &'static NothingModel,
+    ) -> (std::sync::Arc<BarBudsController>, sim::NothingSim) {
+        use crate::simulator::Simulator;
+        let controller = BarBudsController::new(DeviceModel::Nothing);
+        let mut device = sim::NothingSim::new(model);
+        let mut outbound = controller.start();
+        while !outbound.is_empty() {
+            controller.feed(device.receive(&outbound)).unwrap();
+            outbound = controller.take_outbound();
+        }
+        (controller, device)
+    }
+
+    fn exchange(controller: &BarBudsController, device: &mut sim::NothingSim, frame: Vec<u8>) {
+        use crate::simulator::Simulator;
+        controller.feed(device.receive(&frame)).unwrap();
+    }
+
+    #[test]
+    fn the_model_table_is_consistent() {
+        let mut ids: Vec<u16> = models::MODELS.iter().map(|m| m.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), models::MODELS.len(), "duplicate model IDs");
+        let tested: Vec<&str> = models::MODELS
+            .iter()
+            .filter(|m| m.tested)
+            .map(|m| m.name)
+            .collect();
+        assert_eq!(tested, ["Nothing Ear (open)"]);
+        for model in models::MODELS {
+            let mut codes: Vec<u8> = model.presets.iter().map(|&(_, _, c)| c).collect();
+            codes.sort();
+            codes.dedup();
+            assert_eq!(
+                codes.len(),
+                model.presets.len(),
+                "{}: duplicate preset codes",
+                model.name
+            );
+            assert!(!model.presets.is_empty(), "{}", model.name);
+            if let Some(anc) = model.anc {
+                assert!(!anc.cancelling.is_empty(), "{}", model.name);
+            }
+            for slot in model.gestures {
+                assert!(
+                    slot.actions.len() >= 2,
+                    "{}: {:?}",
+                    model.name,
+                    slot.gesture
+                );
+                for &action in slot.actions {
+                    assert!(action_code(action).is_some(), "{}: {action:?}", model.name);
+                }
+            }
+            assert_eq!(
+                model.single_battery,
+                matches!(
+                    model.form_factor,
+                    FormFactor::Headphones | FormFactor::Neckband
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn every_listed_model_connects_and_round_trips() {
+        for model in models::MODELS {
+            let name = model.name;
+            let (controller, mut device) = connect_to(model);
+            let caps = controller.capabilities();
+            let state = controller.state();
+            assert_eq!(caps.display_name, name);
+            assert_eq!(caps.form_factor, model.form_factor, "{name}");
+            assert_eq!(caps.has_charging_case, !model.single_battery, "{name}");
+            assert!(state.battery.left.is_some(), "{name}: battery");
+            assert_eq!(
+                state.battery.charging_case.is_some(),
+                !model.single_battery,
+                "{name}"
+            );
+            assert!(state.info.firmware.left.is_some(), "{name}: firmware");
+            for toggle in &caps.toggles {
+                assert!(
+                    state.toggles.contains_key(toggle),
+                    "{name}: {toggle:?} not read"
+                );
+            }
+
+            // Noise control: reported, and every mode switches.
+            if model.anc.is_some() {
+                assert_eq!(state.anc, Some(AncMode::NoiseCancelling), "{name}");
+                for &mode in &caps.anc_modes {
+                    exchange(
+                        &controller,
+                        &mut device,
+                        controller.encode_anc(mode).unwrap(),
+                    );
+                    assert_eq!(controller.state().anc, Some(mode), "{name}: {mode:?}");
+                }
+            } else {
+                assert!(caps.anc_modes.is_empty(), "{name}");
+            }
+
+            // Every preset, with the model's own command (the simulator
+            // only accepts that one).
+            let eq = caps.eq.clone().unwrap();
+            assert_eq!(
+                state.eq.as_ref().and_then(|e| e.preset.clone()).as_deref(),
+                Some(model.presets[0].0),
+                "{name}"
+            );
+            for preset in &eq.presets {
+                let settings = EqSettings {
+                    preset: Some(preset.id.clone()),
+                    gains: vec![],
+                };
+                exchange(
+                    &controller,
+                    &mut device,
+                    controller.encode_eq(settings).unwrap(),
+                );
+                assert_eq!(
+                    controller.state().eq.unwrap().preset.as_deref(),
+                    Some(preset.id.as_str()),
+                    "{name}: {}",
+                    preset.name
+                );
+            }
+            assert_eq!(eq.band_labels.is_empty(), !model.custom_sliders, "{name}");
+
+            // Every switch, both ways.
+            for &toggle in &caps.toggles {
+                for on in [true, false] {
+                    exchange(
+                        &controller,
+                        &mut device,
+                        controller.encode_toggle(toggle, on).unwrap(),
+                    );
+                    assert_eq!(
+                        controller.state().toggles[&toggle],
+                        on,
+                        "{name}: {toggle:?}"
+                    );
+                }
+            }
+
+            // Every gesture action.
+            match caps.controls {
+                Some(controls) => {
+                    assert_eq!(controls.slots.len(), model.gestures.len(), "{name}");
+                    for slot in controls.slots {
+                        for action in slot.actions {
+                            let setting = ControlSetting {
+                                side: slot.side,
+                                gesture: slot.gesture,
+                                action,
+                            };
+                            exchange(
+                                &controller,
+                                &mut device,
+                                controller.encode_control(setting).unwrap(),
+                            );
+                            assert!(
+                                controller.state().controls.contains(&setting),
+                                "{name}: {setting:?}"
+                            );
+                        }
+                    }
+                }
+                None => assert!(model.gestures.is_empty(), "{name}"),
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_or_refused_model_ids_show_the_basics() {
+        // An ID BarBuds doesn't list.
+        let controller = BarBudsController::new(DeviceModel::Nothing);
+        controller.start();
+        controller
+            .feed(reply(direction::REPLY, command::EQ_GET, &[0, 0]))
+            .unwrap();
+        controller.take_outbound();
+        controller
+            .feed(reply(direction::REPLY, command::MODEL_ID, &[0x99, 0xB1]))
+            .unwrap();
+        let caps = controller.capabilities();
+        assert_eq!(caps.display_name, "Nothing");
+        assert_eq!(caps.eq, None);
+        assert!(caps.anc_modes.is_empty());
+        assert_eq!(caps.toggles, [FeatureToggle::LowLatency]);
+        assert_eq!(controller.take_outbound()[3], command::LATENCY_GET);
+
+        // A refused model-ID request.
+        let controller = BarBudsController::new(DeviceModel::Nothing);
+        controller.start();
+        controller
+            .feed(reply(direction::REPLY, command::EQ_GET, &[0, 0]))
+            .unwrap();
+        controller.take_outbound();
+        let mut refused = reply(direction::REPLY, command::MODEL_ID, &[]);
+        refused[1] |= 0x01;
+        assert!(controller.feed(refused).is_err());
+        assert_eq!(
+            controller.capabilities().toggles,
+            [FeatureToggle::LowLatency]
+        );
+        assert_eq!(controller.take_outbound()[3], command::LATENCY_GET);
+    }
+
+    #[test]
+    fn cmf_presets_use_the_listening_mode_command() {
+        // CMF Buds Pro 2: set with 0xF01D; reported under 0x1F or 0x50.
+        let controller = identified(0xB187);
+        controller
+            .feed(reply(direction::REPLY, command::EQ_GET, &[0x01, 0]))
+            .unwrap();
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("rock")
+        );
+        let frame = controller.encode_eq(preset_eq("pop")).unwrap();
+        assert_eq!(frame[3..5], [command::LISTENING_SET, direction::SET]);
+        assert_eq!(frame[8..10], [0x03, 0x00]);
+        controller
+            .feed(reply(direction::ACK, command::LISTENING_SET, &[]))
+            .unwrap();
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("pop")
+        );
+        controller
+            .feed(reply(direction::REPLY, command::LISTENING_GET, &[0x05, 0]))
+            .unwrap();
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("classical")
+        );
+        // No sliders: a custom curve is refused.
+        assert!(controller.encode_eq(custom_eq([1.0, 0.0, 0.0])).is_err());
+    }
+
+    #[test]
+    fn noise_cancelling_keeps_its_strength() {
+        // Nothing Ear (a): the buds report Mid (0x02); switching away and
+        // back sets Mid again, not the default High.
+        let controller = identified(0xB183);
+        controller
+            .feed(reply(direction::REPLY, command::ANC_GET, &[1, 0x02, 0]))
+            .unwrap();
+        assert_eq!(controller.state().anc, Some(AncMode::NoiseCancelling));
+        let off = controller.encode_anc(AncMode::Off).unwrap();
+        assert_eq!(off[3..5], [command::ANC_SET, direction::SET]);
+        assert_eq!(off[8..11], [0x01, 0x05, 0x00]);
+        let back = controller.encode_anc(AncMode::NoiseCancelling).unwrap();
+        assert_eq!(back[8..11], [0x01, 0x02, 0x00]);
+        // A notification (direction 0xE0, code 0x03) updates the mode.
+        controller
+            .feed(reply(
+                direction::NOTIFY_ALT,
+                command::ANC_NOTIFY,
+                &[1, 0x07, 0],
+            ))
+            .unwrap();
+        assert_eq!(controller.state().anc, Some(AncMode::Transparency));
+        // Without a reported strength, the model's default (High).
+        let fresh = identified(0xB183);
+        let frame = fresh.encode_anc(AncMode::NoiseCancelling).unwrap();
+        assert_eq!(frame[9], 0x01);
+    }
+
+    #[test]
+    fn noise_control_gesture_variants_are_one_action() {
+        // Models report 0x0A or 0x14-0x16 for noise control.
+        let settings = gesture_settings(&hex("02 02 01 07 15 03 01 07 0a")).unwrap();
+        assert!(
+            settings
+                .iter()
+                .all(|s| s.action == ControlAction::NoiseControl)
+        );
+        assert_eq!(settings.len(), 2);
+        // Headphone controls (device 0x06) and other buttons are skipped.
+        assert!(
+            gesture_settings(&hex("02 06 0a 01 0a 02 05 01 0a"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn in_ear_detection_reads_and_writes() {
+        let controller = identified(0xB183);
+        controller
+            .feed(reply(direction::REPLY, command::IN_EAR_GET, &[1, 1, 0]))
+            .unwrap();
+        assert!(!controller.state().toggles[&FeatureToggle::InEarDetection]);
+        let frame = controller
+            .encode_toggle(FeatureToggle::InEarDetection, true)
+            .unwrap();
+        assert_eq!(frame[3..5], [command::IN_EAR_SET, direction::SET]);
+        assert_eq!(frame[8..11], [0x01, 0x01, 0x01]);
+        // Not offered on the Ear (open).
+        assert!(
+            ear_open()
+                .encode_toggle(FeatureToggle::InEarDetection, true)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_factory_name_identifies_the_model_without_asking() {
+        let controller = BarBudsController::new(DeviceModel::Nothing);
+        controller.set_device_name("Nothing Ear (open)".to_string());
+        assert_eq!(controller.start().len(), 3 * (HEADER_LEN + CRC_LEN));
+        assert_eq!(controller.capabilities().display_name, "Nothing Ear (open)");
+        controller
+            .feed(reply(direction::REPLY, command::EQ_GET, &[3, 0]))
+            .unwrap();
+        // Straight to the model's reads: the Ear (open)'s proven sequence.
+        assert_eq!(controller.take_outbound()[3], command::LATENCY_GET);
+        assert_eq!(
+            controller.state().eq.unwrap().preset.as_deref(),
+            Some("more-bass")
+        );
+        // Kept across reconnects.
+        controller.reset();
+        controller.start();
+        assert_eq!(controller.capabilities().display_name, "Nothing Ear (open)");
+    }
+
+    #[test]
+    fn names_match_the_longest_factory_name() {
+        let name = |n: &str| models::model_for_name(n).map(|m| m.name);
+        assert_eq!(name("CMF Buds Pro 2"), Some("CMF Buds Pro 2"));
+        assert_eq!(name("CMF Buds Pro"), Some("CMF Buds Pro"));
+        assert_eq!(name("CMF Buds 2 Plus"), Some("CMF Buds 2 Plus"));
+        assert_eq!(name("CMF Buds 2a"), Some("CMF Buds 2a"));
+        assert_eq!(name("nothing ear (1)"), Some("Nothing Ear (1)"));
+        assert_eq!(name("Nothing Ear"), Some("Nothing Ear"));
+        assert_eq!(name("Nothing Ear (a)"), Some("Nothing Ear (a)"));
+        // Renamed: ask the earbuds instead.
+        assert_eq!(name("Nikhil's buds"), None);
+        let controller = BarBudsController::new(DeviceModel::Nothing);
+        controller.set_device_name("Nikhil's buds".to_string());
+        controller.start();
+        controller
+            .feed(reply(direction::REPLY, command::EQ_GET, &[0, 0]))
+            .unwrap();
+        assert_eq!(controller.take_outbound()[3], command::MODEL_ID);
     }
 }

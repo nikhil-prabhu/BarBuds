@@ -8,6 +8,8 @@ struct AncControl: View {
     let selected: AncMode?
     /// Whether the mode can be changed from BarBuds right now.
     var availability: AncAvailability = .available
+    /// "earbuds" or "headphones", for the hints.
+    var deviceNoun = "earbuds"
     let onSelect: (AncMode) -> Void
 
     var body: some View {
@@ -30,11 +32,11 @@ struct AncControl: View {
     private var hint: String? {
         switch availability {
         case .onDeviceOnly:
-            "These earbuds only let you change this on the earbuds themselves."
+            "These \(deviceNoun) only let you change this on the \(deviceNoun) themselves."
         case .notNow:
-            "Available while wearing your earbuds"
+            "Available while wearing your \(deviceNoun)"
         case .available:
-            selected == nil ? "Available while wearing your earbuds" : nil
+            selected == nil ? "Available while wearing your \(deviceNoun)" : nil
         }
     }
 

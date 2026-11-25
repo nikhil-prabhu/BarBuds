@@ -2,7 +2,7 @@
 
 mod fast_pair;
 mod google;
-mod nothing_ear_open;
+mod nothing;
 mod pixel_buds_a_series;
 mod pixel_buds_pro;
 
@@ -15,9 +15,27 @@ pub(crate) fn rfcomm_service_uuid(model: DeviceModel) -> &'static str {
     match model {
         DeviceModel::PixelBudsPro => pixel_buds_pro::SERVICE_UUID,
         DeviceModel::PixelBudsASeries => pixel_buds_a_series::SERVICE_UUID,
-        DeviceModel::NothingEarOpen => nothing_ear_open::SERVICE_UUID,
+        DeviceModel::Nothing => nothing::SERVICE_UUID,
         DeviceModel::FastPair => crate::fast_pair::FAST_PAIR_SERVICE_UUID,
     }
+}
+
+/// Every Nothing and CMF model the `Nothing` driver knows.
+pub(crate) fn nothing_models() -> Vec<crate::model::NothingModelInfo> {
+    nothing::models::MODELS
+        .iter()
+        .map(|m| crate::model::NothingModelInfo {
+            id: m.id,
+            name: m.name.to_string(),
+            tested: m.tested,
+        })
+        .collect()
+}
+
+/// A simulated Nothing or CMF device of the model with this ID.
+pub(crate) fn nothing_simulator(id: u16) -> Option<Box<dyn Simulator>> {
+    let model = nothing::models::model(id)?;
+    Some(Box::new(nothing::sim::NothingSim::new(model)))
 }
 
 /// A simulated device speaking `model`'s protocol, for the app's Debug menu.
@@ -27,7 +45,7 @@ pub(crate) fn simulator_for(model: DeviceModel) -> Box<dyn Simulator> {
             pixel_buds_pro::sim::DEFAULT_CHANNEL,
         )),
         DeviceModel::PixelBudsASeries => Box::<pixel_buds_a_series::sim::ASeriesSim>::default(),
-        DeviceModel::NothingEarOpen => Box::<nothing_ear_open::sim::NothingEarOpenSim>::default(),
+        DeviceModel::Nothing => Box::<nothing::sim::NothingSim>::default(),
         DeviceModel::FastPair => Box::<fast_pair::sim::FastPairSim>::default(),
     }
 }
@@ -38,7 +56,7 @@ pub(crate) fn driver_for(model: DeviceModel) -> Box<dyn EarbudDriver> {
         DeviceModel::PixelBudsASeries => {
             Box::<pixel_buds_a_series::PixelBudsASeriesDriver>::default()
         }
-        DeviceModel::NothingEarOpen => Box::<nothing_ear_open::NothingEarOpenDriver>::default(),
+        DeviceModel::Nothing => Box::<nothing::NothingDriver>::default(),
         DeviceModel::FastPair => Box::<fast_pair::FastPairDriver>::default(),
     }
 }

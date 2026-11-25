@@ -61,6 +61,13 @@ pub(crate) trait EarbudDriver: Send {
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError>;
 
+    /// The device's Bluetooth name, given before `start()` (and kept across
+    /// reconnects). Drivers covering several models may use it to identify
+    /// the model; most ignore it.
+    fn set_device_name(&mut self, name: &str) {
+        let _ = name;
+    }
+
     /// Only called when `capabilities().has_balance`, with a value already
     /// checked to be in `BALANCE_MIN..=BALANCE_MAX`.
     fn encode_balance(&mut self, balance: i32) -> Result<Vec<u8>, BarBudsError> {

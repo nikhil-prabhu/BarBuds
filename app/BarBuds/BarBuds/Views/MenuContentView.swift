@@ -95,6 +95,7 @@ private struct DeviceControls: View {
                 modes: capabilities.ancModes,
                 selected: session.state.anc,
                 availability: session.state.ancAvailability,
+                deviceNoun: capabilities.formFactor.deviceNoun,
                 onSelect: session.setAnc
             )
         }
@@ -124,7 +125,8 @@ private struct DeviceControls: View {
                 toggles: capabilities.toggles,
                 values: session.state.toggles,
                 isExpanded: $settingsExpanded,
-                onSet: { session.setToggle($0, on: $1) }
+                onSet: { session.setToggle($0, on: $1) },
+                formFactor: capabilities.formFactor
             )
         }
 
@@ -187,8 +189,19 @@ private struct MenuHeader: View {
                 Section("Debug") {
                     Menu("Simulate Device Connecting") {
                         ForEach(supportedModels(), id: \.self) { model in
-                            Button(BarBudsController(model: model).capabilities().displayName) {
-                                devices.simulateConnect(model)
+                            if model == .nothing {
+                                // One driver, many models: pick which to simulate.
+                                Menu("Nothing and CMF") {
+                                    ForEach(nothingModels(), id: \.id) { nothing in
+                                        Button(nothing.tested ? nothing.name : "\(nothing.name) (Untested)") {
+                                            devices.simulateConnect(nothing: nothing)
+                                        }
+                                    }
+                                }
+                            } else {
+                                Button(BarBudsController(model: model).capabilities().displayName) {
+                                    devices.simulateConnect(model)
+                                }
                             }
                         }
                     }
@@ -197,7 +210,7 @@ private struct MenuHeader: View {
                     Toggle("Prefer Fast Pair Driver (Applies on Relaunch)", isOn: $preferFastPair)
                 }
                 #endif
-                Button("About These Earbuds") {
+                Button("About These \(devices.selected?.capabilities.formFactor.deviceTitle ?? "Earbuds")") {
                     NSApp.activate()
                     openWindow(id: "device-info")
                 }
@@ -286,7 +299,7 @@ private struct MenuHeader: View {
 }
 
 #Preview("Nothing Ear (open)") {
-    MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .nothingEarOpen)]))
+    MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .nothing, name: "Nothing Ear (open)")]))
 }
 
 #Preview("Fast Pair device") {

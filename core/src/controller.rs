@@ -31,6 +31,8 @@ pub struct BarBudsController {
 
 struct Inner {
     driver: Box<dyn EarbudDriver>,
+    /// The Bluetooth name passed to `set_device_name`, kept for new drivers.
+    device_name: Option<String>,
     rx: Vec<u8>,
     outbound: Vec<u8>,
     state: DeviceState,
@@ -40,6 +42,7 @@ impl Inner {
     fn new(model: DeviceModel) -> Self {
         Self {
             driver: driver_for(model),
+            device_name: None,
             rx: Vec::new(),
             outbound: Vec::new(),
             state: DeviceState::default(),
@@ -124,6 +127,7 @@ impl BarBudsController {
             rx,
             outbound,
             state,
+            ..
         } = &mut *guard;
         rx.extend_from_slice(&bytes);
 
@@ -292,7 +296,21 @@ impl BarBudsController {
 
     /// Forget buffered bytes, protocol state and device state, e.g. after a disconnect.
     pub fn reset(&self) {
-        *self.inner() = Inner::new(self.model);
+        let mut inner = self.inner();
+        let name = inner.device_name.take();
+        *inner = Inner::new(self.model);
+        if let Some(name) = name {
+            inner.driver.set_device_name(&name);
+            inner.device_name = Some(name);
+        }
+    }
+
+    /// The device's Bluetooth name, before `start()`. Lets a driver that
+    /// covers a vendor's lineup (Nothing) recognise the model straight away.
+    pub fn set_device_name(&self, name: String) {
+        let mut inner = self.inner();
+        inner.driver.set_device_name(&name);
+        inner.device_name = Some(name);
     }
 }
 
@@ -378,15 +396,15 @@ mod tests {
     fn applies_valid_frames_around_garbage() {
         // Needs a protocol with a start-of-frame byte to resync on (Fast
         // Pair messages have none), so this uses the Nothing protocol.
-        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
-        let device = DeviceSimulator::new(DeviceModel::NothingEarOpen);
+        let controller = BarBudsController::new(DeviceModel::Nothing);
+        let device = DeviceSimulator::new(DeviceModel::Nothing);
         let mut bytes = vec![0xDE, 0xAD];
         bytes.extend(device.receive(controller.start()));
         let err = controller.feed(bytes).unwrap_err();
         assert!(matches!(err, BarBudsError::MalformedFrame { .. }));
         let state = controller.state();
         assert_eq!(state.battery.left.unwrap().percent, 100);
-        assert!(state.eq.is_some());
+        assert!(state.info.firmware.left.is_some());
     }
 
     #[test]

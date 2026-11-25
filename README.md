@@ -17,9 +17,12 @@ BarBuds lives in the menu bar and automatically lists every supported pair of ea
 | Google Pixel Buds Pro (1st gen) | ✓ | Off, Noise Cancelling, Transparency | 5-band (±6 dB) with presets | Conversation Detection, Volume EQ, Multipoint, In-Ear Detection, Touch Controls, Mono Audio, press & hold action and its noise-control cycle |
 | Google Pixel Buds A-Series | ✓ | – | Bass level (−1 to +4) | Adaptive Sound, Volume EQ, In-Ear Detection |
 | Nothing Ear (open) *(partial)* | ✓ | – | 3-band Custom (±6 dB) with presets | Multipoint (Dual Connection), Low Latency Mode, gesture controls |
+| Other Nothing and CMF earbuds and headphones *(untested)* | ✓ (one level for headphones and the Neckband Pro) | Off, Noise Cancelling, Transparency, where the model has them | Presets | In-Ear Detection, Multipoint (Dual Connection), Low Latency Mode and gesture controls, where the model has them |
 | Other earbuds and headphones with Google Fast Pair *(generic)* | ✓ (one level for headphones), if the device reports it | Shown; usually changeable only on the device | – | – |
 
 *Partial* support means the basics are confirmed on real hardware but some of the vendor app's features are missing.
+
+*Untested* support means BarBuds speaks the protocol of a model it has been confirmed on, using other projects' descriptions of each model, but nobody has tried it with BarBuds yet. For Nothing and CMF that covers the Nothing Ear (1), Ear (2), Ear (stick), Ear, Ear (a), Ear (3), Ear (3a), Headphone (1) and Headphone (a), and the CMF Buds, Buds 2, Buds 2a, Buds 2 Plus, Buds Neo, Buds Pro, Buds Pro 2, Headphone Pro and Neckband Pro. BarBuds asks the earbuds which model they are and shows only what that model has. Noise Cancelling keeps the strength the earbuds last used, which can only be changed in the Nothing X or CMF app. If you try BarBuds with one of these, please [open an issue](https://github.com/nikhil-prabhu/BarBuds/issues) saying what works.
 
 *Generic* support covers earbuds and headphones that BarBuds has no specific driver for but that support Google Fast Pair (the Android quick-pairing popup), using only what the Fast Pair standard defines. Not every device reports its battery level. Fast Pair only lets a device's paired phone change noise control, so most devices refuse changes from a Mac; BarBuds then shows the current mode without letting you change it.
 

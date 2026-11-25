@@ -11,7 +11,7 @@ struct FindControl: View {
     var body: some View {
         // Always open while a bud rings, so Mute is never hidden.
         CollapsibleSection(
-            title: "Find Earbuds",
+            title: "Find \(formFactor.deviceTitle)",
             isExpanded: Binding(get: { isExpanded || find.isRinging }, set: { isExpanded = $0 })
         ) {
             controls
@@ -21,11 +21,34 @@ struct FindControl: View {
     @ViewBuilder
     private var controls: some View {
         HStack(spacing: 8) {
-            budButton("Left", systemImage: formFactor.leftSymbol, isRinging: find.ringing.left) {
-                ring(left: !find.ringing.left, right: find.ringing.right)
-            }
-            budButton("Right", systemImage: formFactor.rightSymbol, isRinging: find.ringing.right) {
-                ring(left: find.ringing.left, right: !find.ringing.right)
+            if formFactor.isSingleUnit {
+                // One piece: Fast Pair rings it with the bit used for the
+                // right bud, so either bud's ringing counts.
+                budButton(
+                    formFactor.deviceTitle,
+                    systemImage: formFactor.pairSymbol,
+                    isRinging: find.isRinging,
+                    accessibilityName: formFactor.deviceNoun
+                ) {
+                    ring(left: false, right: !find.isRinging)
+                }
+            } else {
+                budButton(
+                    "Left",
+                    systemImage: formFactor.leftSymbol,
+                    isRinging: find.ringing.left,
+                    accessibilityName: "left earbud"
+                ) {
+                    ring(left: !find.ringing.left, right: find.ringing.right)
+                }
+                budButton(
+                    "Right",
+                    systemImage: formFactor.rightSymbol,
+                    isRinging: find.ringing.right,
+                    accessibilityName: "right earbud"
+                ) {
+                    ring(left: find.ringing.left, right: !find.ringing.right)
+                }
             }
         }
         .disabled(find.connection == .opening)
@@ -35,7 +58,9 @@ struct FindControl: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            Text("Take your earbuds out first. The sound is loud.")
+            Text(formFactor == .headphones
+                 ? "Take your headphones off first. The sound is loud."
+                 : "Take your earbuds out first. The sound is loud.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -50,6 +75,7 @@ struct FindControl: View {
         _ side: String,
         systemImage: String,
         isRinging: Bool,
+        accessibilityName: String,
         action: @escaping () -> Void
     ) -> some View {
         let button = Button(action: action) {
@@ -71,7 +97,7 @@ struct FindControl: View {
             .padding(.vertical, 2)
             .frame(maxWidth: .infinity)
         }
-        .accessibilityLabel(isRinging ? "Mute \(side) earbud" : "Ring \(side) earbud")
+        .accessibilityLabel(isRinging ? "Mute \(accessibilityName)" : "Ring \(accessibilityName)")
 
         if isRinging {
             button.buttonStyle(.glassProminent)
@@ -86,6 +112,16 @@ struct FindControl: View {
     FindControl(
         find: FindSession(makeTransport: { SimulatedTransport.find() }),
         formFactor: .stemless,
+        isExpanded: .constant(true)
+    )
+        .padding()
+        .frame(width: 300)
+}
+
+#Preview("Headphones") {
+    FindControl(
+        find: FindSession(makeTransport: { SimulatedTransport.find() }),
+        formFactor: .headphones,
         isExpanded: .constant(true)
     )
         .padding()

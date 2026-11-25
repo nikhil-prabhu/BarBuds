@@ -17,6 +17,9 @@ struct GestureControls: View {
     var ancCycle: [AncMode]? = nil
     var onSetAncCycle: ([AncMode]) -> Void = { _ in }
 
+    /// Fits the longest action, "Voice Assistant".
+    private static let menuWidth: CGFloat = 150
+
     /// The core's `ANC_CYCLE_MIN_MODES`: the vendor apps need at least two.
     private static let minimumCycleModes = 2
 
@@ -79,7 +82,10 @@ struct GestureControls: View {
         let current = settings.first { $0.side == slot.side && $0.gesture == slot.gesture }?.action
         return HStack {
             Text(slot.gesture.title(for: capabilities.input))
-                .lineLimit(1)
+                // "Double Pinch & Hold" next to a wide menu wraps rather
+                // than truncating.
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Picker(slot.gesture.title(for: capabilities.input), selection: Binding(
                 get: { current },
@@ -94,7 +100,8 @@ struct GestureControls: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
-            .fixedSize()
+            // One width for every menu, so they line up in a column.
+            .frame(width: Self.menuWidth)
             .disabled(current == nil)
             .accessibilityLabel("\(slot.side.title) \(slot.gesture.title(for: capabilities.input))")
         }
