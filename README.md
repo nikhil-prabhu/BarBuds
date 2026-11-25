@@ -2,6 +2,8 @@
   <img src="assets/logo.svg" alt="BarBuds logo: two clinking beer mugs" width="128">
   <h1>BarBuds</h1>
   <img alt="maintenance-status" src="https://img.shields.io/badge/maintenance-experimental-blue.svg">
+  <a href="https://github.com/nikhil-prabhu/BarBuds/actions/workflows/core.yml"><img alt="Core CI status" src="https://github.com/nikhil-prabhu/BarBuds/actions/workflows/core.yml/badge.svg"></a>
+  <a href="https://github.com/nikhil-prabhu/BarBuds/actions/workflows/app.yml"><img alt="App CI status" src="https://github.com/nikhil-prabhu/BarBuds/actions/workflows/app.yml/badge.svg"></a>
 </div>
 
 A native macOS menu bar utility for configuring wireless earbuds: battery levels, noise control, EQ and device settings, without the vendor's phone app.

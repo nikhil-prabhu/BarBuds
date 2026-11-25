@@ -1,0 +1,92 @@
+# Builds the macOS app as a Release build, the way scripts/package.sh does,
+# but unsigned (no certificate in CI). Release compiles out `#if DEBUG`
+# code, so this also catches Debug-only helpers used in shipping code.
+name: App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "core/**"
+      - "Makefile"
+      - ".github/workflows/app.yml"
+  pull_request:
+    paths:
+      - "app/**"
+      - "core/**"
+      - "Makefile"
+      - ".github/workflows/app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match the uniffi version in core/Cargo.toml.
+  CARGO_SWIFT_VERSION: 0.11.1
+
+jobs:
+  build:
+    name: Build (Release, unsigned)
+    # GitHub's Xcode 27 image (Apple Silicon). Building needs Xcode 27 for its
+    # text-format project file (project.xcproj); the app still runs on macOS 26.
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          # The Swift package is a universal (arm64 + x86_64) binary.
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache cargo-swift
+        id: cargo-swift-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-swift
+          key: cargo-swift-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_SWIFT_VERSION }}
+
+      - name: Install cargo-swift
+        if: steps.cargo-swift-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-swift@${{ env.CARGO_SWIFT_VERSION }} --locked
+
+      - name: Cache Cargo downloads and builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            core/target
+          key: cargo-app-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: cargo-app-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build the Rust core as a Swift package
+        run: make core
+
+      - name: Build the app
+        run: |
+          xcodebuild \
+            -project app/BarBuds/BarBuds.xcodeproj \
+            -scheme BarBuds \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Check the architectures
+        run: lipo -info build/DerivedData/Build/Products/Release/BarBuds.app/Contents/MacOS/BarBuds
