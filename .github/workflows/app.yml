@@ -38,7 +38,7 @@ jobs:
     # text-format project file (project.xcproj); the app still runs on macOS 26.
     runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show Xcode version
         run: xcodebuild -version
@@ -52,7 +52,7 @@ jobs:
 
       - name: Cache cargo-swift
         id: cargo-swift-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-swift
           key: cargo-swift-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_SWIFT_VERSION }}
@@ -62,7 +62,7 @@ jobs:
         run: cargo install cargo-swift@${{ env.CARGO_SWIFT_VERSION }} --locked
 
       - name: Cache Cargo downloads and builds
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index

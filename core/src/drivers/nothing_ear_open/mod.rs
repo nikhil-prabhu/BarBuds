@@ -149,7 +149,9 @@ pub(crate) fn gesture_settings(payload: &[u8]) -> Result<Vec<ControlSetting>, Ba
         .split_first()
         .ok_or_else(|| BarBudsError::malformed("empty gestures payload"))?;
     Ok(entries
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .take(count as usize)
         .filter_map(|entry| {
             let side = match entry[0] {
@@ -294,7 +296,7 @@ fn battery_status(payload: &[u8]) -> Result<BatteryStatus, BarBudsError> {
         .split_first()
         .ok_or_else(|| BarBudsError::malformed("empty battery payload"))?;
     let mut status = BatteryStatus::default();
-    for pair in pairs.chunks_exact(2).take(count as usize) {
+    for pair in pairs.as_chunks::<2>().0.iter().take(count as usize) {
         let level = pair[1] & 0x7F;
         if level > 100 {
             continue; // Not reporting.
