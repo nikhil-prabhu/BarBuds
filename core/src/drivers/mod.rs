@@ -24,9 +24,9 @@ pub(crate) fn rfcomm_service_uuid(model: DeviceModel) -> Option<&'static str> {
 pub(crate) fn simulator_for(model: DeviceModel) -> Box<dyn Simulator> {
     match model {
         DeviceModel::Mock => Box::new(mock::MockSim::default()),
-        DeviceModel::PixelBudsPro => {
-            Box::new(pixel_buds_pro::sim::PixelBudsSim::new(pixel_buds_pro::sim::DEFAULT_CHANNEL))
-        }
+        DeviceModel::PixelBudsPro => Box::new(pixel_buds_pro::sim::PixelBudsSim::new(
+            pixel_buds_pro::sim::DEFAULT_CHANNEL,
+        )),
         DeviceModel::PixelBudsASeries => Box::<pixel_buds_a_series::sim::ASeriesSim>::default(),
         DeviceModel::NothingEarOpen => Box::<nothing_ear_open::sim::NothingEarOpenSim>::default(),
     }
@@ -36,7 +36,9 @@ pub(crate) fn driver_for(model: DeviceModel) -> Box<dyn EarbudDriver> {
     match model {
         DeviceModel::Mock => Box::new(mock::MockDriver),
         DeviceModel::PixelBudsPro => Box::<pixel_buds_pro::PixelBudsProDriver>::default(),
-        DeviceModel::PixelBudsASeries => Box::<pixel_buds_a_series::PixelBudsASeriesDriver>::default(),
+        DeviceModel::PixelBudsASeries => {
+            Box::<pixel_buds_a_series::PixelBudsASeriesDriver>::default()
+        }
         DeviceModel::NothingEarOpen => Box::<nothing_ear_open::NothingEarOpenDriver>::default(),
     }
 }

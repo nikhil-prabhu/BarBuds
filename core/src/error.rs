@@ -23,14 +23,20 @@ pub enum BarBudsError {
 
 impl BarBudsError {
     pub(crate) fn malformed(reason: impl Into<String>) -> Self {
-        Self::MalformedFrame { reason: reason.into() }
+        Self::MalformedFrame {
+            reason: reason.into(),
+        }
     }
 
     pub(crate) fn device(reason: impl Into<String>) -> Self {
-        Self::Device { reason: reason.into() }
+        Self::Device {
+            reason: reason.into(),
+        }
     }
 
     pub(crate) fn invalid_argument(reason: impl Into<String>) -> Self {
-        Self::InvalidArgument { reason: reason.into() }
+        Self::InvalidArgument {
+            reason: reason.into(),
+        }
     }
 }

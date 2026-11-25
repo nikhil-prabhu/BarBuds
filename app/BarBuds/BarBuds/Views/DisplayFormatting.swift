@@ -85,6 +85,48 @@ extension FeatureToggle {
     }
 }
 
+extension ControlGesture {
+    /// E.g. "Double Pinch" or "Tap & Hold", in the buds' own terms.
+    func title(for input: ControlInput) -> String {
+        let verb = switch input {
+        case .pinch: "Pinch"
+        case .tap: "Tap"
+        case .press: "Press"
+        }
+        return switch self {
+        case .single: verb
+        case .double: "Double \(verb)"
+        case .triple: "Triple \(verb)"
+        case .hold: "\(verb) & Hold"
+        case .doubleHold: "Double \(verb) & Hold"
+        }
+    }
+}
+
+extension ControlAction {
+    var title: String {
+        switch self {
+        case .playPause: "Play/Pause"
+        case .skipForward: "Skip Forward"
+        case .skipBack: "Skip Back"
+        case .volumeUp: "Volume Up"
+        case .volumeDown: "Volume Down"
+        case .voiceAssistant: "Voice Assistant"
+        case .noiseControl: "Noise Control"
+        case .noAction: "No Action"
+        }
+    }
+}
+
+extension BudSide {
+    var title: String {
+        switch self {
+        case .left: "Left"
+        case .right: "Right"
+        }
+    }
+}
+
 enum Units {
     /// Decibels: 3 → "+3 dB", 0 → "0 dB", -2.5 → "-2.5 dB". Levels: 2 → "+2".
     static func gain(_ value: Float, unit: EqUnit) -> String {

@@ -4,12 +4,14 @@
 //! acknowledgement (`0x70`), and `tick` sends a battery notification.
 //! Starting values match the tester's earbuds: 100% / 100%, case 65%,
 //! Balanced EQ, Low Lag Mode off; Dual Connection on and a flat Custom curve
-//! are guesses.
+//! are guesses. Gestures start at BudsLink's Ear (open) factory defaults.
 
 use super::{
     CONTROL_HAS_CRC, CRC_LEN, CUSTOM_CODE, HEADER_LEN, HOST_CONTROL, MAX_PAYLOAD, PRESETS, SOF,
-    command, component, custom_eq_gains, custom_eq_payload, direction, encode_frame,
+    command, component, custom_eq_gains, custom_eq_payload, direction, encode_frame, gesture_entry,
+    gesture_settings,
 };
+use crate::model::{BudSide, ControlAction, ControlGesture, ControlSetting};
 use crate::simulator::Simulator;
 
 pub(crate) struct NothingEarOpenSim {
@@ -23,6 +25,7 @@ pub(crate) struct NothingEarOpenSim {
     custom: [f32; 3],
     low_latency: bool,
     dual_connection: bool,
+    gestures: Vec<ControlSetting>,
 }
 
 impl Default for NothingEarOpenSim {
@@ -36,6 +39,28 @@ impl Default for NothingEarOpenSim {
             custom: [0.0; 3],
             low_latency: false,
             dual_connection: true,
+            gestures: {
+                use BudSide::*;
+                use ControlAction::*;
+                use ControlGesture::*;
+                [
+                    (Left, Double, SkipForward),
+                    (Right, Double, SkipForward),
+                    (Left, Triple, SkipBack),
+                    (Right, Triple, SkipBack),
+                    (Left, Hold, VolumeDown),
+                    (Right, Hold, VolumeUp),
+                    (Left, DoubleHold, NoAction),
+                    (Right, DoubleHold, NoAction),
+                ]
+                .into_iter()
+                .map(|(side, gesture, action)| ControlSetting {
+                    side,
+                    gesture,
+                    action,
+                })
+                .collect()
+            },
         }
     }
 }
@@ -75,6 +100,31 @@ impl NothingEarOpenSim {
             (direction::GET, command::DEVICE_INFO) => {
                 reply(b"2,4,SIMLEFT01\n3,4,SIMRIGHT01\n4,4,SIMCASE01\n")
             }
+            (direction::GET, command::GESTURES_GET) => {
+                let mut payload = vec![self.gestures.len() as u8];
+                payload.extend(
+                    self.gestures
+                        .iter()
+                        .filter_map(|&g| gesture_entry(g))
+                        .flatten(),
+                );
+                reply(&payload)
+            }
+            (direction::SET, command::GESTURES_SET) => match gesture_settings(payload) {
+                Ok(changes) if !changes.is_empty() => {
+                    for change in changes {
+                        if let Some(existing) = self
+                            .gestures
+                            .iter_mut()
+                            .find(|g| g.side == change.side && g.gesture == change.gesture)
+                        {
+                            existing.action = change.action;
+                        }
+                    }
+                    ack()
+                }
+                _ => Vec::new(),
+            },
             (direction::GET, command::DUAL_GET) => reply(&[u8::from(self.dual_connection)]),
             (direction::GET, command::CUSTOM_EQ_GET) => reply(&custom_eq_payload(self.custom)),
             (direction::SET, command::DUAL_SET) => match payload.first() {

@@ -62,7 +62,7 @@ impl DeviceSimulator {
 mod tests {
     use super::*;
     use crate::controller::BarBudsController;
-    use crate::model::EqSettings;
+    use crate::model::{ControlSetting, EqSettings};
     use crate::supported_models;
 
     /// Relay bytes between controller and simulator until both are quiet,
@@ -94,6 +94,42 @@ mod tests {
             }
             for toggle in &caps.toggles {
                 assert!(state.toggles.contains_key(toggle), "{model:?}: {toggle:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_gesture_takes_every_offered_action() {
+        for model in supported_models() {
+            let (controller, sim) = connected(model);
+            let Some(controls) = controller.capabilities().controls else {
+                continue;
+            };
+            for slot in controls.slots {
+                assert!(
+                    controller
+                        .state()
+                        .controls
+                        .iter()
+                        .any(|c| c.side == slot.side && c.gesture == slot.gesture),
+                    "{model:?}: {slot:?} not reported"
+                );
+                for action in slot.actions {
+                    let setting = ControlSetting {
+                        side: slot.side,
+                        gesture: slot.gesture,
+                        action,
+                    };
+                    exchange(
+                        &controller,
+                        &sim,
+                        controller.encode_control(setting).unwrap(),
+                    );
+                    assert!(
+                        controller.state().controls.contains(&setting),
+                        "{model:?}: {setting:?}"
+                    );
+                }
             }
         }
     }

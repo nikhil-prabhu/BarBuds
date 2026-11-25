@@ -21,7 +21,9 @@ pub(crate) struct MockSim {
 
 impl Default for MockSim {
     fn default() -> Self {
-        Self { device: MockEarbuds::new() }
+        Self {
+            device: MockEarbuds::new(),
+        }
     }
 }
 
@@ -35,10 +37,11 @@ impl crate::simulator::Simulator for MockSim {
     }
 }
 
-use crate::driver::{Decoded, Event, EarbudDriver};
+use crate::driver::{Decoded, EarbudDriver, Event};
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle, FormFactor,
+    AncMode, DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle,
+    FormFactor,
 };
 use codec::frame_type;
 
@@ -138,20 +141,28 @@ impl EarbudDriver for MockDriver {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
             display_name: "Mock Buds".to_string(),
-            anc_modes: vec![AncMode::Off, AncMode::NoiseCancelling, AncMode::Transparency],
+            anc_modes: vec![
+                AncMode::Off,
+                AncMode::NoiseCancelling,
+                AncMode::Transparency,
+            ],
             eq: Some(EqCapabilities {
                 band_labels: BAND_LABELS.map(String::from).to_vec(),
                 unit: EqUnit::Decibels,
                 min_gain: f32::from(MIN_GAIN_DB),
                 max_gain: f32::from(MAX_GAIN_DB),
                 step: 1.0,
-                presets: MockPreset::BUILT_IN.iter().filter_map(|p| p.info()).collect(),
+                presets: MockPreset::BUILT_IN
+                    .iter()
+                    .filter_map(|p| p.info())
+                    .collect(),
             }),
             has_charging_case: true,
             form_factor: FormFactor::Stemmed,
             toggles: codec::TOGGLES.to_vec(),
             can_ring: true,
             has_balance: false,
+            controls: None,
         }
     }
 
@@ -160,13 +171,17 @@ impl EarbudDriver for MockDriver {
         let result = frame.and_then(|frame| match frame.frame_type {
             frame_type::BATTERY => codec::decode_battery(frame.payload).map(Event::Battery),
             frame_type::ANC => codec::decode_anc(frame.payload).map(|mode| Event::Anc(Some(mode))),
-            frame_type::TOGGLE => codec::decode_toggle(frame.payload)
-                .map(|(toggle, on)| Event::Toggle(toggle, on)),
+            frame_type::TOGGLE => {
+                codec::decode_toggle(frame.payload).map(|(toggle, on)| Event::Toggle(toggle, on))
+            }
             frame_type::EQ => codec::decode_eq(frame.payload)
                 .map(|(preset, gains)| Event::Eq(eq_settings(preset, &gains))),
             other => Err(BarBudsError::UnknownFrameType { frame_type: other }),
         });
-        Some(Decoded { consumed, result: result.map(Some) })
+        Some(Decoded {
+            consumed,
+            result: result.map(Some),
+        })
     }
 
     fn start(&mut self) -> Vec<u8> {
@@ -174,24 +189,32 @@ impl EarbudDriver for MockDriver {
     }
 
     fn encode_anc(&mut self, mode: AncMode) -> Result<Vec<u8>, BarBudsError> {
-        Ok(codec::encode(frame_type::SET_ANC, &[codec::anc_to_byte(mode)]))
+        Ok(codec::encode(
+            frame_type::SET_ANC,
+            &[codec::anc_to_byte(mode)],
+        ))
     }
 
     fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
-        Ok(codec::encode(frame_type::SET_TOGGLE, &codec::toggle_payload(toggle, on)))
+        Ok(codec::encode(
+            frame_type::SET_TOGGLE,
+            &codec::toggle_payload(toggle, on),
+        ))
     }
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
-        let preset = MockPreset::from_id(eq.preset.as_deref()).ok_or_else(|| {
-            BarBudsError::Unsupported {
+        let preset =
+            MockPreset::from_id(eq.preset.as_deref()).ok_or_else(|| BarBudsError::Unsupported {
                 feature: format!("EQ preset {:?}", eq.preset),
-            }
-        })?;
+            })?;
         let gains = match preset_curve(preset) {
             Some(curve) => curve,
             None => quantize_gains(&eq.gains)?,
         };
-        Ok(codec::encode(frame_type::SET_EQ, &codec::eq_payload(preset, &gains)))
+        Ok(codec::encode(
+            frame_type::SET_EQ,
+            &codec::eq_payload(preset, &gains),
+        ))
     }
 }
 
@@ -251,7 +274,9 @@ mod tests {
         assert_eq!(decoded.consumed, frame.len());
         assert_eq!(
             decoded.result,
-            Err(BarBudsError::UnknownFrameType { frame_type: frame_type::SET_ANC })
+            Err(BarBudsError::UnknownFrameType {
+                frame_type: frame_type::SET_ANC
+            })
         );
     }
 }

@@ -2,9 +2,9 @@
 //! the simulated device.
 
 use super::BAND_COUNT;
+use super::MockPreset;
 use crate::error::BarBudsError;
 use crate::model::{AncMode, BatteryReading, BatteryStatus, FeatureToggle};
-use super::MockPreset;
 
 pub(crate) const MAGIC: u8 = 0xBB;
 const HEADER_LEN: usize = 3; // magic, type, len
@@ -81,7 +81,13 @@ pub(crate) fn decode(buf: &[u8]) -> Option<(usize, Result<RawFrame<'_>, BarBudsE
             }),
         ));
     }
-    Some((total, Ok(RawFrame { frame_type, payload })))
+    Some((
+        total,
+        Ok(RawFrame {
+            frame_type,
+            payload,
+        }),
+    ))
 }
 
 fn expect_len(payload: &[u8], len: usize, what: &str) -> Result<(), BarBudsError> {
@@ -133,7 +139,9 @@ fn byte_to_battery(byte: u8) -> Result<Option<BatteryReading>, BarBudsError> {
             percent,
             charging: byte & CHARGING_BIT != 0,
         })),
-        _ => Err(BarBudsError::malformed(format!("battery {percent}% out of range"))),
+        _ => Err(BarBudsError::malformed(format!(
+            "battery {percent}% out of range"
+        ))),
     }
 }
 
@@ -173,7 +181,9 @@ fn byte_to_preset(byte: u8) -> Result<MockPreset, BarBudsError> {
         2 => Ok(MockPreset::Vocal),
         3 => Ok(MockPreset::TrebleBoost),
         PRESET_CUSTOM => Ok(MockPreset::Custom),
-        other => Err(BarBudsError::malformed(format!("unknown EQ preset {other}"))),
+        other => Err(BarBudsError::malformed(format!(
+            "unknown EQ preset {other}"
+        ))),
     }
 }
 
@@ -201,10 +211,17 @@ pub(crate) fn decode_eq(payload: &[u8]) -> Result<(MockPreset, [i8; BAND_COUNT])
 
 // --- FeatureToggle: [toggle id, 0 = off / 1 = on] ---
 
-pub(crate) const TOGGLES: [FeatureToggle; 3] = [FeatureToggle::InEarDetection, FeatureToggle::AdaptiveSound, FeatureToggle::VolumeEq];
+pub(crate) const TOGGLES: [FeatureToggle; 3] = [
+    FeatureToggle::InEarDetection,
+    FeatureToggle::AdaptiveSound,
+    FeatureToggle::VolumeEq,
+];
 
 pub(crate) fn toggle_payload(toggle: FeatureToggle, on: bool) -> [u8; 2] {
-    let id = TOGGLES.iter().position(|&t| t == toggle).expect("all toggles have ids");
+    let id = TOGGLES
+        .iter()
+        .position(|&t| t == toggle)
+        .expect("all toggles have ids");
     [id as u8, u8::from(on)]
 }
 
@@ -226,7 +243,10 @@ mod tests {
     #[test]
     fn encodes_anc_command() {
         // BB 81 01 02 | checksum = 0x81 ^ 0x01 ^ 0x02 = 0x82
-        assert_eq!(encode(frame_type::SET_ANC, &[2]), [0xBB, 0x81, 0x01, 0x02, 0x82]);
+        assert_eq!(
+            encode(frame_type::SET_ANC, &[2]),
+            [0xBB, 0x81, 0x01, 0x02, 0x82]
+        );
     }
 
     #[test]
@@ -238,9 +258,27 @@ mod tests {
         let frame = frame.unwrap();
         assert_eq!(frame.frame_type, frame_type::BATTERY);
         let battery = decode_battery(frame.payload).unwrap();
-        assert_eq!(battery.left, Some(BatteryReading { percent: 82, charging: false }));
-        assert_eq!(battery.right, Some(BatteryReading { percent: 78, charging: false }));
-        assert_eq!(battery.charging_case, Some(BatteryReading { percent: 64, charging: true }));
+        assert_eq!(
+            battery.left,
+            Some(BatteryReading {
+                percent: 82,
+                charging: false
+            })
+        );
+        assert_eq!(
+            battery.right,
+            Some(BatteryReading {
+                percent: 78,
+                charging: false
+            })
+        );
+        assert_eq!(
+            battery.charging_case,
+            Some(BatteryReading {
+                percent: 64,
+                charging: true
+            })
+        );
     }
 
     #[test]

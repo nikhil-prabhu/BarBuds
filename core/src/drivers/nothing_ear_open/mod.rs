@@ -25,16 +25,18 @@
 //! Confirmed on Ear (open) hardware (a tester, 2026-11): framing and request
 //! CRCs, battery, firmware, EQ presets (codes from BudsLink, GPL-3.0,
 //! <https://github.com/maniacx/BudsLink>; facts only) and low-latency mode.
-//! Not yet confirmed: the Custom EQ curve (EarA-linux's encoding, confirmed
-//! on other Nothing models) and Dual Connection (BudsLink's commands).
+//! Also confirmed: the Custom EQ curve (EarA-linux's encoding) and Dual
+//! Connection (BudsLink's commands). Not yet confirmed: gesture controls
+//! (BudsLink's Ear (open) table).
 
 pub(crate) mod sim;
 
 use crate::driver::{Decoded, EarbudDriver, Event};
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, BatteryReading, BatteryStatus, ComponentStrings, DeviceCapabilities, EqCapabilities,
-    EqPreset, EqSettings, EqUnit, FeatureToggle, FormFactor,
+    AncMode, BatteryReading, BatteryStatus, BudSide, ComponentStrings, ControlAction,
+    ControlCapabilities, ControlGesture, ControlInput, ControlSetting, ControlSlot,
+    DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle, FormFactor,
 };
 
 /// RFCOMM service UUID of the Nothing X control channel (all Nothing/CMF models).
@@ -83,6 +85,97 @@ mod command {
     /// The Custom EQ curve; see [`super::custom_eq_payload`].
     pub const CUSTOM_EQ_SET: u8 = 0x41;
     pub const CUSTOM_EQ_GET: u8 = 0x44;
+    /// Gesture actions: `[count, (bud, button, gesture, action) × count]`.
+    pub const GESTURES_GET: u8 = 0x18;
+    /// Changes gestures; same layout as the reply (BudsLink sends one).
+    pub const GESTURES_SET: u8 = 0x03;
+}
+
+/// The Ear (open)'s only button, on each bud.
+const GESTURE_BUTTON: u8 = 0x01;
+
+/// Gesture wire codes, from BudsLink's Ear (open) table.
+const GESTURES: [(ControlGesture, u8); 4] = [
+    (ControlGesture::Double, 0x02),
+    (ControlGesture::Triple, 0x03),
+    (ControlGesture::Hold, 0x07),
+    (ControlGesture::DoubleHold, 0x09),
+];
+
+/// Action wire codes, from BudsLink's Nothing table.
+const ACTIONS: [(ControlAction, u8); 6] = [
+    (ControlAction::NoAction, 0x01),
+    (ControlAction::SkipBack, 0x08),
+    (ControlAction::SkipForward, 0x09),
+    (ControlAction::VoiceAssistant, 0x0B),
+    (ControlAction::VolumeUp, 0x12),
+    (ControlAction::VolumeDown, 0x13),
+];
+
+/// The actions the Nothing X app offers for each gesture (BudsLink's table).
+fn gesture_actions(gesture: ControlGesture) -> Vec<ControlAction> {
+    use ControlAction::*;
+    match gesture {
+        ControlGesture::Double | ControlGesture::Triple => {
+            vec![SkipBack, SkipForward, VoiceAssistant]
+        }
+        ControlGesture::Hold => vec![VolumeUp, VolumeDown, VoiceAssistant],
+        ControlGesture::DoubleHold => vec![VolumeUp, VolumeDown, VoiceAssistant, NoAction],
+        ControlGesture::Single => vec![],
+    }
+}
+
+fn gesture_code(gesture: ControlGesture) -> Option<u8> {
+    GESTURES
+        .iter()
+        .find(|&&(g, _)| g == gesture)
+        .map(|&(_, c)| c)
+}
+
+fn action_code(action: ControlAction) -> Option<u8> {
+    ACTIONS.iter().find(|&&(a, _)| a == action).map(|&(_, c)| c)
+}
+
+fn side_code(side: BudSide) -> u8 {
+    match side {
+        BudSide::Left => component::LEFT,
+        BudSide::Right => component::RIGHT,
+    }
+}
+
+/// Gesture settings from a reply; entries BarBuds doesn't know are skipped.
+pub(crate) fn gesture_settings(payload: &[u8]) -> Result<Vec<ControlSetting>, BarBudsError> {
+    let (&count, entries) = payload
+        .split_first()
+        .ok_or_else(|| BarBudsError::malformed("empty gestures payload"))?;
+    Ok(entries
+        .chunks_exact(4)
+        .take(count as usize)
+        .filter_map(|entry| {
+            let side = match entry[0] {
+                component::LEFT => BudSide::Left,
+                component::RIGHT => BudSide::Right,
+                _ => return None,
+            };
+            let gesture = GESTURES.iter().find(|&&(_, c)| c == entry[2])?.0;
+            let action = ACTIONS.iter().find(|&&(_, c)| c == entry[3])?.0;
+            Some(ControlSetting {
+                side,
+                gesture,
+                action,
+            })
+        })
+        .collect())
+}
+
+/// One gesture entry as sent or reported.
+pub(crate) fn gesture_entry(setting: ControlSetting) -> Option<[u8; 4]> {
+    Some([
+        side_code(setting.side),
+        GESTURE_BUTTON,
+        gesture_code(setting.gesture)?,
+        action_code(setting.action)?,
+    ])
 }
 
 /// The device-info field type holding a serial number.
@@ -376,6 +469,10 @@ impl NothingEarOpenDriver {
                 };
                 Ok(Some(Event::Eq(self.eq(self.preset.clone()))))
             }
+            (direction::REPLY, command::GESTURES_GET) => {
+                let settings = gesture_settings(payload)?;
+                Ok((!settings.is_empty()).then_some(Event::Controls(settings)))
+            }
             (direction::REPLY, command::CUSTOM_EQ_GET) => {
                 self.custom_gains = custom_eq_gains(payload)?;
                 Ok(Some(Event::Eq(self.eq(self.preset.clone()))))
@@ -432,6 +529,19 @@ impl EarbudDriver for NothingEarOpenDriver {
             // Confirmed on hardware: the Ear (open) accepts the Fast Pair ring.
             can_ring: true,
             has_balance: false,
+            controls: Some(ControlCapabilities {
+                input: ControlInput::Pinch,
+                slots: [BudSide::Left, BudSide::Right]
+                    .into_iter()
+                    .flat_map(|side| {
+                        GESTURES.iter().map(move |&(gesture, _)| ControlSlot {
+                            side,
+                            gesture,
+                            actions: gesture_actions(gesture),
+                        })
+                    })
+                    .collect(),
+            }),
         }
     }
 
@@ -444,6 +554,7 @@ impl EarbudDriver for NothingEarOpenDriver {
             command::LATENCY_GET,
             command::DUAL_GET,
             command::CUSTOM_EQ_GET,
+            command::GESTURES_GET,
         ]);
         [command::BATTERY, command::FIRMWARE, command::EQ_GET]
             .into_iter()
@@ -550,6 +661,19 @@ impl EarbudDriver for NothingEarOpenDriver {
         let confirms = Event::Eq(self.preset_eq(id));
         Ok(self.set(command::EQ_SET, &[code, 0x00], confirms))
     }
+    fn encode_control(&mut self, setting: ControlSetting) -> Result<Vec<u8>, BarBudsError> {
+        let entry = gesture_entry(setting).ok_or_else(|| BarBudsError::Unsupported {
+            feature: format!("{setting:?}"),
+        })?;
+        let mut payload = vec![1];
+        payload.extend(entry);
+        Ok(self.set(
+            command::GESTURES_SET,
+            &payload,
+            Event::Controls(vec![setting]),
+        ))
+    }
+
     fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
         match toggle {
             FeatureToggle::LowLatency => {
@@ -945,7 +1069,8 @@ mod tests {
             [
                 command::LATENCY_GET,
                 command::DUAL_GET,
-                command::CUSTOM_EQ_GET
+                command::CUSTOM_EQ_GET,
+                command::GESTURES_GET,
             ]
         );
         let state = controller.state();
@@ -1031,5 +1156,118 @@ mod tests {
             .feed(reply(direction::NOTIFY_ALT, command::DUAL_NOTIFY, &[1]))
             .unwrap();
         assert!(controller.state().toggles[&FeatureToggle::Multipoint]);
+    }
+
+    /// BudsLink's Ear (open) factory defaults, as a gestures reply payload.
+    const DEFAULT_GESTURES: &str = "08 02 01 02 09 03 01 02 09 02 01 03 08 03 01 03 08 02 01 07 13 03 01 07 12 02 01 09 01 03 01 09 01";
+
+    #[test]
+    fn decodes_default_gestures() {
+        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        controller
+            .feed(reply(
+                direction::REPLY,
+                command::GESTURES_GET,
+                &hex(DEFAULT_GESTURES),
+            ))
+            .unwrap();
+        let controls = controller.state().controls;
+        assert_eq!(controls.len(), 8);
+        let action = |side, gesture| {
+            controls
+                .iter()
+                .find(|c| c.side == side && c.gesture == gesture)
+                .unwrap()
+                .action
+        };
+        use ControlAction::*;
+        use ControlGesture::*;
+        assert_eq!(action(BudSide::Left, Double), SkipForward);
+        assert_eq!(action(BudSide::Right, Triple), SkipBack);
+        assert_eq!(action(BudSide::Left, Hold), VolumeDown);
+        assert_eq!(action(BudSide::Right, Hold), VolumeUp);
+        assert_eq!(action(BudSide::Right, DoubleHold), NoAction);
+        // Every reported action is one the capabilities offer for its slot.
+        let caps = controller.capabilities().controls.unwrap();
+        for c in &controls {
+            let slot = caps
+                .slots
+                .iter()
+                .find(|s| s.side == c.side && s.gesture == c.gesture)
+                .unwrap();
+            assert!(slot.actions.contains(&c.action), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn unknown_gesture_entries_are_skipped() {
+        // An unknown action (0x7f) and an unknown bud (0x09) next to a known entry.
+        let payload = hex("03 02 01 02 7f 09 01 02 09 03 01 03 0b");
+        let settings = gesture_settings(&payload).unwrap();
+        assert_eq!(
+            settings,
+            [ControlSetting {
+                side: BudSide::Right,
+                gesture: ControlGesture::Triple,
+                action: ControlAction::VoiceAssistant,
+            }]
+        );
+    }
+
+    #[test]
+    fn changing_a_gesture_applies_after_acknowledgement() {
+        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        controller
+            .feed(reply(
+                direction::REPLY,
+                command::GESTURES_GET,
+                &hex(DEFAULT_GESTURES),
+            ))
+            .unwrap();
+        let setting = ControlSetting {
+            side: BudSide::Left,
+            gesture: ControlGesture::Double,
+            action: ControlAction::VoiceAssistant,
+        };
+        let frame = controller.encode_control(setting).unwrap();
+        // BudsLink's layout: one entry, [left, button 1, double, assistant].
+        assert_eq!(frame[3..5], [command::GESTURES_SET, direction::SET]);
+        assert_eq!(frame[8..13], hex("01 02 01 02 0b")[..]);
+        assert!(!controller.state().controls.contains(&setting));
+        controller
+            .feed(reply(direction::ACK, command::GESTURES_SET, &[]))
+            .unwrap();
+        assert!(controller.state().controls.contains(&setting));
+        assert_eq!(controller.state().controls.len(), 8);
+    }
+
+    #[test]
+    fn actions_a_gesture_lacks_are_refused() {
+        let controller = BarBudsController::new(DeviceModel::NothingEarOpen);
+        for setting in [
+            // Double pinch can't change the volume.
+            (
+                BudSide::Left,
+                ControlGesture::Double,
+                ControlAction::VolumeUp,
+            ),
+            // Single pinch isn't remappable on the Ear (open).
+            (
+                BudSide::Left,
+                ControlGesture::Single,
+                ControlAction::PlayPause,
+            ),
+        ] {
+            let (side, gesture, action) = setting;
+            assert!(
+                controller
+                    .encode_control(ControlSetting {
+                        side,
+                        gesture,
+                        action
+                    })
+                    .is_err()
+            );
+        }
     }
 }

@@ -51,6 +51,7 @@ private struct DeviceControls: View {
     @AppStorage("settingsExpanded") private var settingsExpanded = false
     @AppStorage("findExpanded") private var findExpanded = false
     @AppStorage("balanceExpanded") private var balanceExpanded = false
+    @AppStorage("controlsExpanded") private var controlsExpanded = false
 
     var body: some View {
         switch session.connection {
@@ -121,6 +122,17 @@ private struct DeviceControls: View {
                 values: session.state.toggles,
                 isExpanded: $settingsExpanded,
                 onSet: { session.setToggle($0, on: $1) }
+            )
+        }
+
+        if let controls = capabilities.controls {
+            Divider()
+            GestureControls(
+                capabilities: controls,
+                settings: session.state.controls,
+                formFactor: capabilities.formFactor,
+                isExpanded: $controlsExpanded,
+                onSet: session.setControl
             )
         }
 

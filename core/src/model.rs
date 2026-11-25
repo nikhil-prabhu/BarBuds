@@ -114,6 +114,77 @@ pub struct DeviceCapabilities {
     pub can_ring: bool,
     /// The left/right volume balance can be adjusted (see [`DeviceState::balance`]).
     pub has_balance: bool,
+    /// Gestures whose action can be changed; `None` when there are none.
+    pub controls: Option<ControlCapabilities>,
+}
+
+/// The gesture controls a model lets the user remap.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ControlCapabilities {
+    /// How the buds are operated, so the UI can name gestures the vendor's
+    /// way ("Double pinch", "Double tap").
+    pub input: ControlInput,
+    /// Every remappable gesture, in display order.
+    pub slots: Vec<ControlSlot>,
+}
+
+/// One remappable gesture on one bud and the actions it can take.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ControlSlot {
+    pub side: BudSide,
+    pub gesture: ControlGesture,
+    /// The actions this gesture can be set to, in display order.
+    pub actions: Vec<ControlAction>,
+}
+
+/// A gesture's current action, as the device reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Record)]
+pub struct ControlSetting {
+    pub side: BudSide,
+    pub gesture: ControlGesture,
+    pub action: ControlAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum BudSide {
+    Left,
+    Right,
+}
+
+/// How the buds are operated. (The UI owns the wording.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum ControlInput {
+    /// Squeezing the stem (e.g. Nothing).
+    Pinch,
+    /// Tapping a touch surface.
+    Tap,
+    /// Pressing a physical button.
+    Press,
+}
+
+/// A vendor-neutral gesture, named in the UI after [`ControlInput`]. (Not
+/// called `Gesture`, which would clash with SwiftUI's `Gesture`.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum ControlGesture {
+    Single,
+    Double,
+    Triple,
+    Hold,
+    DoubleHold,
+}
+
+/// What a gesture does. (The UI owns the titles.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum ControlAction {
+    PlayPause,
+    SkipForward,
+    SkipBack,
+    VolumeUp,
+    VolumeDown,
+    VoiceAssistant,
+    NoiseControl,
+    /// The gesture does nothing.
+    NoAction,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -153,6 +224,8 @@ pub struct DeviceState {
     /// Left/right volume balance from [`BALANCE_MIN`] (only the left bud plays)
     /// through 0 (centred) to [`BALANCE_MAX`] (only the right bud plays).
     pub balance: Option<i32>,
+    /// The current action of each remappable gesture the device has reported.
+    pub controls: Vec<ControlSetting>,
 }
 
 /// See [`DeviceState::balance`].

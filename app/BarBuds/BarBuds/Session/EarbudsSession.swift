@@ -126,6 +126,11 @@ final class EarbudsSession: Identifiable {
         Task { await send { try controller.encodeToggle(toggle: toggle, on: on) } }
     }
 
+    /// Changes what a gesture does; shown once the device confirms it.
+    func setControl(_ setting: ControlSetting) {
+        Task { await send { try controller.encodeControl(setting: setting) } }
+    }
+
     /// Selects a preset by ID, or a custom curve for `nil`.
     func selectEqPreset(_ presetID: String?) {
         eqWriteTask?.cancel()

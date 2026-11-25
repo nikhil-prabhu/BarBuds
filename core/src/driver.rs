@@ -3,7 +3,8 @@
 
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, BatteryStatus, ComponentStrings, DeviceCapabilities, EqSettings, FeatureToggle,
+    AncMode, BatteryStatus, ComponentStrings, ControlSetting, DeviceCapabilities, EqSettings,
+    FeatureToggle,
 };
 
 /// A state change decoded from one inbound frame.
@@ -18,6 +19,8 @@ pub(crate) enum Event {
     /// See [`crate::DeviceState::balance`].
     Balance(i32),
     SerialNumbers(ComponentStrings),
+    /// Gesture actions; gestures not listed keep their last value.
+    Controls(Vec<ControlSetting>),
 }
 
 /// The outcome of decoding the frame at the front of a receive buffer.
@@ -62,9 +65,20 @@ pub(crate) trait EarbudDriver: Send {
         })
     }
 
+    /// Only called for a slot listed in `capabilities().controls` and one
+    /// of that slot's actions.
+    fn encode_control(&mut self, setting: ControlSetting) -> Result<Vec<u8>, BarBudsError> {
+        let _ = setting;
+        Err(BarBudsError::Unsupported {
+            feature: "gesture controls".to_string(),
+        })
+    }
+
     /// Only called for toggles listed in `capabilities().toggles`.
     fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
         let _ = on;
-        Err(BarBudsError::Unsupported { feature: format!("{toggle:?}") })
+        Err(BarBudsError::Unsupported {
+            feature: format!("{toggle:?}"),
+        })
     }
 }

@@ -2,12 +2,12 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::driver::{Event, EarbudDriver};
+use crate::driver::{EarbudDriver, Event};
 use crate::drivers::driver_for;
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, BALANCE_MAX, BALANCE_MIN, DeviceCapabilities, DeviceModel, DeviceState, EqSettings,
-    FeatureToggle,
+    AncMode, BALANCE_MAX, BALANCE_MIN, ControlSetting, DeviceCapabilities, DeviceModel,
+    DeviceState, EqSettings, FeatureToggle,
 };
 
 /// Drop buffered bytes past this size; a well-behaved device never gets close.
@@ -59,6 +59,16 @@ fn apply(state: &mut DeviceState, event: Event) {
         Event::Firmware(firmware) => state.info.firmware = firmware,
         Event::Balance(balance) => state.balance = Some(balance),
         Event::SerialNumbers(serials) => state.info.serial_numbers = serials,
+        Event::Controls(settings) => {
+            for setting in settings {
+                let slot =
+                    |c: &ControlSetting| c.side == setting.side && c.gesture == setting.gesture;
+                match state.controls.iter_mut().find(|c| slot(c)) {
+                    Some(existing) => *existing = setting,
+                    None => state.controls.push(setting),
+                }
+            }
+        }
     }
 }
 
@@ -66,7 +76,9 @@ impl BarBudsController {
     fn inner(&self) -> MutexGuard<'_, Inner> {
         // A panic while holding the lock can't leave `Inner` logically broken,
         // so recover instead of propagating the poison to every later call.
-        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -101,7 +113,12 @@ impl BarBudsController {
     /// call `state()` to get the up-to-date state.
     pub fn feed(&self, bytes: Vec<u8>) -> Result<DeviceState, BarBudsError> {
         let mut guard = self.inner();
-        let Inner { driver, rx, outbound, state } = &mut *guard;
+        let Inner {
+            driver,
+            rx,
+            outbound,
+            state,
+        } = &mut *guard;
         rx.extend_from_slice(&bytes);
 
         let mut first_error = None;
@@ -158,10 +175,14 @@ impl BarBudsController {
 
     pub fn encode_eq(&self, eq: EqSettings) -> Result<Vec<u8>, BarBudsError> {
         // A preset must be one the model lists; a custom curve needs bands.
-        let supported = self.capabilities.eq.as_ref().is_some_and(|caps| match &eq.preset {
-            Some(id) => caps.presets.iter().any(|preset| &preset.id == id),
-            None => !caps.band_labels.is_empty(),
-        });
+        let supported = self
+            .capabilities
+            .eq
+            .as_ref()
+            .is_some_and(|caps| match &eq.preset {
+                Some(id) => caps.presets.iter().any(|preset| &preset.id == id),
+                None => !caps.band_labels.is_empty(),
+            });
         if !supported {
             return Err(BarBudsError::Unsupported {
                 feature: match &eq.preset {
@@ -200,6 +221,27 @@ impl BarBudsController {
         self.inner().driver.encode_toggle(toggle, on)
     }
 
+    /// Frame changing one gesture's action. The state changes once the
+    /// device confirms it through `feed()`.
+    pub fn encode_control(&self, setting: ControlSetting) -> Result<Vec<u8>, BarBudsError> {
+        let allowed = self.capabilities.controls.as_ref().is_some_and(|controls| {
+            controls.slots.iter().any(|slot| {
+                slot.side == setting.side
+                    && slot.gesture == setting.gesture
+                    && slot.actions.contains(&setting.action)
+            })
+        });
+        if !allowed {
+            return Err(BarBudsError::Unsupported {
+                feature: format!(
+                    "{:?} {:?} set to {:?}",
+                    setting.side, setting.gesture, setting.action
+                ),
+            });
+        }
+        self.inner().driver.encode_control(setting)
+    }
+
     /// Forget buffered bytes, protocol state and device state, e.g. after a disconnect.
     pub fn reset(&self) {
         *self.inner() = Inner::new(self.model);
@@ -215,9 +257,7 @@ mod tests {
     fn connected() -> (Arc<BarBudsController>, Arc<MockEarbuds>) {
         let controller = BarBudsController::new(DeviceModel::Mock);
         let device = MockEarbuds::new();
-        controller
-            .feed(device.receive(controller.start()))
-            .unwrap();
+        controller.feed(device.receive(controller.start())).unwrap();
         (controller, device)
     }
 
@@ -231,7 +271,13 @@ mod tests {
     fn status_request_populates_state() {
         let (controller, _) = connected();
         let state = controller.state();
-        assert_eq!(state.battery.left, Some(BatteryReading { percent: 82, charging: false }));
+        assert_eq!(
+            state.battery.left,
+            Some(BatteryReading {
+                percent: 82,
+                charging: false
+            })
+        );
         assert_eq!(state.anc, Some(AncMode::NoiseCancelling));
         assert_eq!(state.eq.unwrap().preset.as_deref(), Some("flat"));
     }

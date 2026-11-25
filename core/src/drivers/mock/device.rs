@@ -4,10 +4,10 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::MockPreset;
 use super::codec::{self, frame_type};
 use super::{BAND_COUNT, MAX_GAIN_DB, MIN_GAIN_DB, preset_curve};
 use crate::model::{AncMode, BatteryReading, BatteryStatus, FeatureToggle};
-use super::MockPreset;
 
 #[derive(uniffi::Object)]
 pub struct MockEarbuds {
@@ -86,7 +86,9 @@ impl SimState {
 
 impl MockEarbuds {
     fn sim(&self) -> MutexGuard<'_, SimState> {
-        self.sim.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.sim
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -97,9 +99,18 @@ impl MockEarbuds {
         Arc::new(Self {
             sim: Mutex::new(SimState {
                 battery: BatteryStatus {
-                    left: Some(BatteryReading { percent: 82, charging: false }),
-                    right: Some(BatteryReading { percent: 78, charging: false }),
-                    charging_case: Some(BatteryReading { percent: 64, charging: true }),
+                    left: Some(BatteryReading {
+                        percent: 82,
+                        charging: false,
+                    }),
+                    right: Some(BatteryReading {
+                        percent: 78,
+                        charging: false,
+                    }),
+                    charging_case: Some(BatteryReading {
+                        percent: 64,
+                        charging: true,
+                    }),
                 },
                 anc: AncMode::NoiseCancelling,
                 preset: MockPreset::Flat,
@@ -138,7 +149,10 @@ impl MockEarbuds {
     pub fn tick(&self) -> Vec<u8> {
         let mut sim = self.sim();
         let battery = &mut sim.battery;
-        for bud in [&mut battery.left, &mut battery.right].into_iter().flatten() {
+        for bud in [&mut battery.left, &mut battery.right]
+            .into_iter()
+            .flatten()
+        {
             bud.percent = bud.percent.saturating_sub(1);
         }
         sim.battery_frame()
