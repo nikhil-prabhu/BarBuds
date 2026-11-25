@@ -12,6 +12,8 @@ pub(crate) use crate::drivers::google::{BatteryInfo, DeviceBatteryInfo, battery_
 pub(crate) mod setting_id {
     pub const CURRENT_ANCR_STATE: i32 = 13;
     pub const CURRENT_USER_EQ: i32 = 16;
+    /// Left/right balance, see [`balance_from_wire`].
+    pub const VOLUME_ASYMMETRY: i32 = 17;
     /// The user's saved custom curve ("Last Saved" in the Pixel Buds app).
     /// pbpctrl saw reads fail on its firmware; BudsLink reads it fine.
     pub const LAST_SAVED_USER_EQ: i32 = 18;
@@ -66,7 +68,7 @@ pub(crate) struct SettingsRsp {
 /// decode as `value: None`.
 #[derive(Clone, PartialEq, Message)]
 pub(crate) struct SettingValue {
-    #[prost(oneof = "Setting", tags = "2, 4, 11, 13, 15, 16, 18, 19, 22")]
+    #[prost(oneof = "Setting", tags = "2, 4, 11, 13, 15, 16, 17, 18, 19, 22")]
     pub value: Option<Setting>,
 }
 
@@ -89,6 +91,9 @@ pub(crate) enum Setting {
     CurrentAncrState(i32),
     #[prost(message, tag = "16")]
     CurrentUserEq(EqBands),
+    /// Raw balance, see [`balance_from_wire`].
+    #[prost(int32, tag = "17")]
+    VolumeAsymmetry(i32),
     #[prost(message, tag = "18")]
     LastSavedUserEq(EqBands),
 }
@@ -118,6 +123,7 @@ impl Setting {
             Setting::SpeechDetection(on) => (bool_setting::SPEECH_DETECTION, on),
             Setting::CurrentAncrState(_)
             | Setting::CurrentUserEq(_)
+            | Setting::VolumeAsymmetry(_)
             | Setting::LastSavedUserEq(_) => return None,
         })
     }
@@ -187,6 +193,24 @@ impl EqBands {
     }
 }
 
+/// Balance from the `volume_asymmetry` wire value (0–200), as decoded by
+/// pbpctrl: the low bit says which side is attenuated, the rest by how much.
+/// Returns -100 (only left plays) … 0 (centred) … 100 (only right plays).
+pub(crate) fn balance_from_wire(raw: i32) -> i32 {
+    let amount = raw >> 1;
+    let balance = if raw & 1 != 0 { amount + 1 } else { -amount };
+    balance.clamp(-100, 100)
+}
+
+/// The inverse of [`balance_from_wire`].
+pub(crate) fn balance_to_wire(balance: i32) -> i32 {
+    if balance > 0 {
+        ((balance - 1) << 1) | 1
+    } else {
+        (-balance) << 1
+    }
+}
+
 pub(crate) fn write_setting(setting: Setting) -> Vec<u8> {
     WriteSettingMsg {
         setting: Some(SettingValue {
@@ -233,6 +257,16 @@ mod tests {
             assert_eq!(msg.setting.unwrap().value, Some(setting), "setting {id}");
         }
         assert_eq!(Setting::from_bool(13, true), None);
+    }
+
+    #[test]
+    fn balance_wire_values_round_trip() {
+        for raw in 0..=200 {
+            assert_eq!(balance_to_wire(balance_from_wire(raw)), raw, "raw {raw}");
+        }
+        assert_eq!(balance_from_wire(0), 0);
+        assert_eq!(balance_from_wire(199), 100);
+        assert_eq!(balance_from_wire(200), -100);
     }
 
     #[test]

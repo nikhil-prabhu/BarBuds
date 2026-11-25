@@ -162,6 +162,7 @@ impl PixelBudsProDriver {
                         setting_id::CURRENT_ANCR_STATE,
                         setting_id::CURRENT_USER_EQ,
                         setting_id::LAST_SAVED_USER_EQ,
+                        setting_id::VOLUME_ASYMMETRY,
                     ]
                     .into();
                     self.pending_reads.extend(TOGGLES.iter().map(|&(_, id)| id));
@@ -244,6 +245,9 @@ impl PixelBudsProDriver {
             Some(Setting::CurrentUserEq(bands)) => {
                 self.current_eq = Some(bands.gains());
                 Ok(Some(Event::Eq(self.eq_settings(bands.gains()))))
+            }
+            Some(Setting::VolumeAsymmetry(raw)) => {
+                Ok(Some(Event::Balance(proto::balance_from_wire(raw))))
             }
             Some(Setting::LastSavedUserEq(bands)) => {
                 self.last_saved = Some(bands.gains());
@@ -350,6 +354,7 @@ impl EarbudDriver for PixelBudsProDriver {
             form_factor: FormFactor::Stemless,
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
             can_ring: true,
+            has_balance: true,
         }
     }
 
@@ -391,6 +396,13 @@ impl EarbudDriver for PixelBudsProDriver {
                 feature: format!("{toggle:?}"),
             })?;
         self.write(setting, Event::Toggle(toggle, on))
+    }
+
+    fn encode_balance(&mut self, balance: i32) -> Result<Vec<u8>, BarBudsError> {
+        self.write(
+            Setting::VolumeAsymmetry(proto::balance_to_wire(balance)),
+            Event::Balance(balance),
+        )
     }
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError> {
@@ -646,6 +658,25 @@ mod tests {
         assert!(matches!(
             controller.encode_eq(unknown),
             Err(BarBudsError::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn balance_reads_and_writes() {
+        let (controller, mut sim) = connected();
+        assert!(controller.capabilities().has_balance);
+        assert_eq!(controller.state().balance, Some(0));
+
+        let frame = controller.encode_balance(-30).unwrap();
+        assert_eq!(controller.state().balance, Some(0), "waits for the device");
+        assert_eq!(exchange(&controller, &mut sim, frame), None);
+        assert_eq!(controller.state().balance, Some(-30));
+        // 30 toward the left is stored as 60 (even = left side louder).
+        assert_eq!(sim.volume_asymmetry(), 60);
+
+        assert!(matches!(
+            controller.encode_balance(101),
+            Err(BarBudsError::InvalidArgument { .. })
         ));
     }
 

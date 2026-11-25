@@ -151,6 +151,7 @@ impl EarbudDriver for MockDriver {
             form_factor: FormFactor::Stemmed,
             toggles: codec::TOGGLES.to_vec(),
             can_ring: true,
+            has_balance: false,
         }
     }
 

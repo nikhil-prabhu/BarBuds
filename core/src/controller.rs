@@ -5,7 +5,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::driver::{Event, EarbudDriver};
 use crate::drivers::driver_for;
 use crate::error::BarBudsError;
-use crate::model::{AncMode, DeviceCapabilities, DeviceModel, DeviceState, EqSettings, FeatureToggle};
+use crate::model::{
+    AncMode, BALANCE_MAX, BALANCE_MIN, DeviceCapabilities, DeviceModel, DeviceState, EqSettings,
+    FeatureToggle,
+};
 
 /// Drop buffered bytes past this size; a well-behaved device never gets close.
 const MAX_RX_BUFFER: usize = 4096;
@@ -54,6 +57,7 @@ fn apply(state: &mut DeviceState, event: Event) {
             state.toggles.insert(toggle, on);
         }
         Event::Firmware(firmware) => state.info.firmware = firmware,
+        Event::Balance(balance) => state.balance = Some(balance),
         Event::SerialNumbers(serials) => state.info.serial_numbers = serials,
     }
 }
@@ -167,6 +171,22 @@ impl BarBudsController {
             });
         }
         self.inner().driver.encode_eq(&eq)
+    }
+
+    /// Frame setting the left/right balance (see [`DeviceState::balance`]).
+    /// The state changes once the device confirms it through `feed()`.
+    pub fn encode_balance(&self, balance: i32) -> Result<Vec<u8>, BarBudsError> {
+        if !self.capabilities.has_balance {
+            return Err(BarBudsError::Unsupported {
+                feature: "balance".to_string(),
+            });
+        }
+        if !(BALANCE_MIN..=BALANCE_MAX).contains(&balance) {
+            return Err(BarBudsError::invalid_argument(format!(
+                "balance {balance} is outside {BALANCE_MIN}…{BALANCE_MAX}"
+            )));
+        }
+        self.inner().driver.encode_balance(balance)
     }
 
     /// Frame turning an on/off feature on or off. The state changes once the

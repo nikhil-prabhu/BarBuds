@@ -15,6 +15,8 @@ pub(crate) enum Event {
     Eq(EqSettings),
     Toggle(FeatureToggle, bool),
     Firmware(ComponentStrings),
+    /// See [`crate::DeviceState::balance`].
+    Balance(i32),
     SerialNumbers(ComponentStrings),
 }
 
@@ -50,6 +52,15 @@ pub(crate) trait EarbudDriver: Send {
     fn encode_anc(&mut self, mode: AncMode) -> Result<Vec<u8>, BarBudsError>;
 
     fn encode_eq(&mut self, eq: &EqSettings) -> Result<Vec<u8>, BarBudsError>;
+
+    /// Only called when `capabilities().has_balance`, with a value already
+    /// checked to be in `BALANCE_MIN..=BALANCE_MAX`.
+    fn encode_balance(&mut self, balance: i32) -> Result<Vec<u8>, BarBudsError> {
+        let _ = balance;
+        Err(BarBudsError::Unsupported {
+            feature: "balance".to_string(),
+        })
+    }
 
     /// Only called for toggles listed in `capabilities().toggles`.
     fn encode_toggle(&mut self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {

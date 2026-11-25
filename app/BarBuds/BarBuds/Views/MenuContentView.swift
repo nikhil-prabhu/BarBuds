@@ -50,6 +50,7 @@ private struct DeviceControls: View {
     /// Shared by every device and remembered across launches.
     @AppStorage("settingsExpanded") private var settingsExpanded = false
     @AppStorage("findExpanded") private var findExpanded = false
+    @AppStorage("balanceExpanded") private var balanceExpanded = false
 
     var body: some View {
         switch session.connection {
@@ -101,6 +102,15 @@ private struct DeviceControls: View {
                 settings: eq,
                 onSelectPreset: session.selectEqPreset,
                 onSetGain: session.setGain
+            )
+        }
+
+        if capabilities.hasBalance {
+            Divider()
+            BalanceSlider(
+                value: session.balance,
+                isExpanded: $balanceExpanded,
+                onChange: session.setBalance
             )
         }
 

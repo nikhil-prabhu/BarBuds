@@ -25,12 +25,15 @@ final class EarbudsSession: Identifiable {
     /// A custom EQ curve being edited that the device hasn't confirmed yet, so
     /// sliders track the pointer instead of waiting on a round trip.
     private var eqDraft: EqSettings?
+    /// A balance being dragged that the device hasn't confirmed yet.
+    private var balanceDraft: Int32?
 
     @ObservationIgnored private let controller: BarBudsController
     @ObservationIgnored private let makeTransport: @Sendable () -> any EarbudsTransport
     @ObservationIgnored private var transport: (any EarbudsTransport)?
     @ObservationIgnored private var readTask: Task<Void, Never>?
     @ObservationIgnored private var eqWriteTask: Task<Void, Never>?
+    @ObservationIgnored private var balanceWriteTask: Task<Void, Never>?
 
     private static let eqDebounce: Duration = .milliseconds(200)
     private static let log = Logger(subsystem: "com.nikhilprabhu.BarBuds", category: "session")
@@ -96,8 +99,11 @@ final class EarbudsSession: Identifiable {
         readTask = nil
         eqWriteTask?.cancel()
         eqWriteTask = nil
+        balanceWriteTask?.cancel()
+        balanceWriteTask = nil
         transport = nil
         eqDraft = nil
+        balanceDraft = nil
         controller.reset()
         state = controller.state()
         connection = .disconnected
@@ -147,12 +153,29 @@ final class EarbudsSession: Identifiable {
         }
     }
 
+    /// The balance to display: the in-progress drag if there is one, else
+    /// the confirmed value. -100 = only left … 0 = centred … 100 = only right.
+    var balance: Int32? { balanceDraft ?? state.balance }
+
+    /// Moves the balance. Writes are debounced like EQ sliders.
+    func setBalance(_ value: Int32) {
+        balanceDraft = value
+        balanceWriteTask?.cancel()
+        balanceWriteTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.eqDebounce)
+            guard !Task.isCancelled, let self else { return }
+            balanceWriteTask = nil
+            await send { try self.controller.encodeBalance(balance: value) }
+        }
+    }
+
     // MARK: I/O
 
     /// Applies bytes read from the device. Returns any frames the protocol
     /// wants written in response.
     private func receive(_ chunk: Data) -> Data {
         let previousEq = state.eq
+        let previousBalance = state.balance
         do {
             state = try controller.feed(bytes: chunk)
         } catch {
@@ -163,6 +186,11 @@ final class EarbudsSession: Identifiable {
         // The device confirmed an EQ change and no newer edit is waiting to be sent.
         if eqWriteTask == nil, state.eq != previousEq {
             eqDraft = nil
+        }
+        // Same for balance; also when the device confirms the value dragged to.
+        if balanceWriteTask == nil,
+           state.balance != previousBalance || state.balance == balanceDraft {
+            balanceDraft = nil
         }
         return controller.takeOutbound()
     }

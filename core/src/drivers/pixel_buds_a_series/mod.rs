@@ -268,6 +268,7 @@ impl EarbudDriver for PixelBudsASeriesDriver {
             form_factor: FormFactor::Stemless,
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
             can_ring: true,
+            has_balance: false,
         }
     }
 

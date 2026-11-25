@@ -108,6 +108,8 @@ pub struct DeviceCapabilities {
     /// Each bud can be rung to find it, via the Fast Pair message stream
     /// (see [`crate::FindController`]).
     pub can_ring: bool,
+    /// The left/right volume balance can be adjusted (see [`DeviceState::balance`]).
+    pub has_balance: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -144,7 +146,15 @@ pub struct DeviceState {
     pub toggles: HashMap<FeatureToggle, bool>,
     /// Firmware versions and serial numbers, once the device has reported them.
     pub info: DeviceInfo,
+    /// Left/right volume balance from [`BALANCE_MIN`] (only the left bud plays)
+    /// through 0 (centred) to [`BALANCE_MAX`] (only the right bud plays).
+    pub balance: Option<i32>,
 }
+
+/// See [`DeviceState::balance`].
+pub const BALANCE_MIN: i32 = -100;
+/// See [`DeviceState::balance`].
+pub const BALANCE_MAX: i32 = 100;
 
 /// One string per component, e.g. a firmware version. `None` when the
 /// component hasn't reported it.

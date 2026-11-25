@@ -158,6 +158,25 @@ mod tests {
     }
 
     #[test]
+    fn balance_round_trips_where_supported() {
+        for model in supported_models() {
+            let (controller, sim) = connected(model);
+            if !controller.capabilities().has_balance {
+                assert!(controller.encode_balance(10).is_err(), "{model:?}");
+                continue;
+            }
+            for balance in [-100, -37, 0, 1, 64, 100] {
+                exchange(
+                    &controller,
+                    &sim,
+                    controller.encode_balance(balance).unwrap(),
+                );
+                assert_eq!(controller.state().balance, Some(balance), "{model:?}");
+            }
+        }
+    }
+
+    #[test]
     fn tick_drains_the_battery() {
         for model in supported_models() {
             let (controller, sim) = connected(model);

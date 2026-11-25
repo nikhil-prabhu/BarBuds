@@ -36,6 +36,8 @@ pub(crate) struct PixelBudsSim {
     eq: proto::EqBands,
     /// The user's saved custom curve ("Last Saved").
     last_saved: proto::EqBands,
+    /// Raw `volume_asymmetry` (balance) value.
+    volume_asymmetry: i32,
     /// Refuse to share the saved curve, as pbpctrl saw on some firmware.
     #[cfg(test)]
     refuse_last_saved: bool,
@@ -74,6 +76,7 @@ impl PixelBudsSim {
             ]),
             eq: proto::EqBands::from_gains([1.0, 0.5, 0.0, -1.5, 2.0]),
             last_saved: proto::EqBands::from_gains([2.0, 1.0, 0.0, 1.0, 2.0]),
+            volume_asymmetry: 0,
             #[cfg(test)]
             refuse_last_saved: false,
             battery: proto::BatteryInfo {
@@ -96,6 +99,11 @@ impl PixelBudsSim {
     #[cfg(test)]
     pub fn anc(&self) -> i32 {
         self.anc
+    }
+
+    #[cfg(test)]
+    pub fn volume_asymmetry(&self) -> i32 {
+        self.volume_asymmetry
     }
 
     #[cfg(test)]
@@ -195,6 +203,9 @@ impl PixelBudsSim {
                 let setting = match msg.settings_id {
                     Some(setting_id::CURRENT_ANCR_STATE) => Setting::CurrentAncrState(self.anc),
                     Some(setting_id::CURRENT_USER_EQ) => Setting::CurrentUserEq(self.eq),
+                    Some(setting_id::VOLUME_ASYMMETRY) => {
+                        Setting::VolumeAsymmetry(self.volume_asymmetry)
+                    }
                     Some(setting_id::LAST_SAVED_USER_EQ) => {
                         #[cfg(test)]
                         if self.refuse_last_saved {
@@ -237,6 +248,7 @@ impl PixelBudsSim {
                     Setting::CurrentAncrState(state) => self.anc = state,
                     Setting::CurrentUserEq(bands) => self.eq = bands,
                     Setting::LastSavedUserEq(bands) => self.last_saved = bands,
+                    Setting::VolumeAsymmetry(raw) => self.volume_asymmetry = raw,
                     ref other => match other.as_bool() {
                         Some((id, on)) => {
                             self.bools.insert(id, on);
