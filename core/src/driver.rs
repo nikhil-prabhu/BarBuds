@@ -3,8 +3,8 @@
 
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, BatteryStatus, ComponentStrings, ControlSetting, DeviceCapabilities, EqSettings,
-    FeatureToggle,
+    AncAvailability, AncMode, BatteryStatus, ComponentStrings, ControlSetting, DeviceCapabilities,
+    EqSettings, FeatureToggle,
 };
 
 /// A state change decoded from one inbound frame.
@@ -21,6 +21,9 @@ pub(crate) enum Event {
     SerialNumbers(ComponentStrings),
     /// Gesture actions; gestures not listed keep their last value.
     Controls(Vec<ControlSetting>),
+    /// The noise-control mode and whether BarBuds can change it.
+    AncState(Option<AncMode>, AncAvailability),
+    AncAvailability(AncAvailability),
     /// The noise-control gesture's modes, in capabilities order.
     AncCycle(Vec<AncMode>),
 }

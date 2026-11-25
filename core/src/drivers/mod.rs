@@ -1,5 +1,6 @@
 //! Vendor-specific drivers.
 
+mod fast_pair;
 mod google;
 pub(crate) mod mock;
 mod nothing_ear_open;
@@ -17,6 +18,7 @@ pub(crate) fn rfcomm_service_uuid(model: DeviceModel) -> Option<&'static str> {
         DeviceModel::PixelBudsPro => Some(pixel_buds_pro::SERVICE_UUID),
         DeviceModel::PixelBudsASeries => Some(pixel_buds_a_series::SERVICE_UUID),
         DeviceModel::NothingEarOpen => Some(nothing_ear_open::SERVICE_UUID),
+        DeviceModel::FastPair => Some(crate::fast_pair::FAST_PAIR_SERVICE_UUID),
     }
 }
 
@@ -29,6 +31,7 @@ pub(crate) fn simulator_for(model: DeviceModel) -> Box<dyn Simulator> {
         )),
         DeviceModel::PixelBudsASeries => Box::<pixel_buds_a_series::sim::ASeriesSim>::default(),
         DeviceModel::NothingEarOpen => Box::<nothing_ear_open::sim::NothingEarOpenSim>::default(),
+        DeviceModel::FastPair => Box::<fast_pair::sim::FastPairSim>::default(),
     }
 }
 
@@ -40,5 +43,6 @@ pub(crate) fn driver_for(model: DeviceModel) -> Box<dyn EarbudDriver> {
             Box::<pixel_buds_a_series::PixelBudsASeriesDriver>::default()
         }
         DeviceModel::NothingEarOpen => Box::<nothing_ear_open::NothingEarOpenDriver>::default(),
+        DeviceModel::FastPair => Box::<fast_pair::FastPairDriver>::default(),
     }
 }

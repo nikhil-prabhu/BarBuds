@@ -42,5 +42,8 @@ pub fn supported_models() -> Vec<DeviceModel> {
         DeviceModel::PixelBudsPro,
         DeviceModel::PixelBudsASeries,
         DeviceModel::NothingEarOpen,
+        // Last: discovery picks the first match, and every specific model
+        // above may also offer Fast Pair.
+        DeviceModel::FastPair,
     ]
 }

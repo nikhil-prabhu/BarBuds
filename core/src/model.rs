@@ -14,6 +14,21 @@ pub enum DeviceModel {
     PixelBudsASeries,
     /// Nothing Ear (open), via the Nothing X control protocol.
     NothingEarOpen,
+    /// Any other earbuds or headphones with Google Fast Pair: the basics
+    /// (battery, firmware, noise control) over the Fast Pair message stream.
+    FastPair,
+}
+
+/// Whether BarBuds can change the noise-control mode right now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum AncAvailability {
+    #[default]
+    Available,
+    /// Not right now, e.g. while the earbuds aren't being worn.
+    NotNow,
+    /// Only on the earbuds themselves: they refuse changes from BarBuds
+    /// (e.g. Fast Pair devices that require a signature only a phone can make).
+    OnDeviceOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
@@ -35,6 +50,8 @@ pub enum FormFactor {
     Stemless,
     /// An open-ear bud held by a hook around the ear.
     EarHook,
+    /// Over- or on-ear headphones: one battery, no case.
+    Headphones,
 }
 
 /// An on/off device feature. The UI owns titles and descriptions, so each
@@ -223,6 +240,8 @@ pub enum EqUnit {
 pub struct DeviceState {
     pub battery: BatteryStatus,
     pub anc: Option<AncMode>,
+    /// Whether `anc` can be changed from BarBuds right now.
+    pub anc_availability: AncAvailability,
     pub eq: Option<EqSettings>,
     /// The confirmed value of each supported toggle the device has reported.
     pub toggles: HashMap<FeatureToggle, bool>,

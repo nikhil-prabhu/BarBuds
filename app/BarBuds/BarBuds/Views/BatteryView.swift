@@ -8,11 +8,21 @@ struct BatteryView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            BatteryGauge(title: "Left", systemImage: formFactor.leftSymbol, reading: battery.left)
-            BatteryGauge(title: "Right", systemImage: formFactor.rightSymbol, reading: battery.right)
-            if hasChargingCase {
-                BatteryGauge(title: "Case", systemImage: FormFactor.caseSymbol, reading: battery.chargingCase)
+            // One battery, reported as `left` (see the core's `FormFactor::Headphones`).
+            if formFactor == .headphones {
+                BatteryGauge(title: "Battery", systemImage: formFactor.pairSymbol, reading: battery.left)
+            } else {
+                earbuds
             }
+        }
+    }
+
+    @ViewBuilder
+    private var earbuds: some View {
+        BatteryGauge(title: "Left", systemImage: formFactor.leftSymbol, reading: battery.left)
+        BatteryGauge(title: "Right", systemImage: formFactor.rightSymbol, reading: battery.right)
+        if hasChargingCase {
+            BatteryGauge(title: "Case", systemImage: FormFactor.caseSymbol, reading: battery.chargingCase)
         }
     }
 }
@@ -93,6 +103,20 @@ private struct BatteryRing<Label: View>: View {
         ),
         hasChargingCase: true,
         formFactor: .stemless
+    )
+    .padding()
+    .frame(width: 300)
+}
+
+#Preview("Headphones") {
+    BatteryView(
+        battery: BatteryStatus(
+            left: BatteryReading(percent: 80, charging: true),
+            right: nil,
+            chargingCase: nil
+        ),
+        hasChargingCase: false,
+        formFactor: .headphones
     )
     .padding()
     .frame(width: 300)

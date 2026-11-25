@@ -37,12 +37,14 @@ extension FormFactor {
         case .stemmedInEar: "earbuds.in.ear"
         case .stemless: "earbuds.stemless"
         case .earHook: "earbuds.bone.conduction"
+        case .headphones: "headphones"
         }
     }
 
     var leftSymbol: String {
         switch self {
         case .stemmed: "earbud.left"
+        case .headphones: pairSymbol
         default: pairSymbol + ".left"
         }
     }
@@ -50,6 +52,7 @@ extension FormFactor {
     var rightSymbol: String {
         switch self {
         case .stemmed: "earbud.right"
+        case .headphones: pairSymbol
         default: pairSymbol + ".right"
         }
     }

@@ -94,6 +94,7 @@ private struct DeviceControls: View {
             AncControl(
                 modes: capabilities.ancModes,
                 selected: session.state.anc,
+                availability: session.state.ancAvailability,
                 onSelect: session.setAnc
             )
         }
@@ -158,6 +159,9 @@ private struct MenuHeader: View {
     let devices: DeviceManager
     @Environment(\.openWindow) private var openWindow
     private let launchAtLogin = LaunchAtLogin.shared
+    #if DEBUG
+    @AppStorage(BluetoothDiscovery.preferFastPairKey) private var preferFastPair = false
+    #endif
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -190,6 +194,7 @@ private struct MenuHeader: View {
                     }
                     Button("Simulate Device Disconnecting", action: devices.simulateDisconnect)
                         .disabled(devices.selected == nil)
+                    Toggle("Prefer Fast Pair Driver (Applies on Relaunch)", isOn: $preferFastPair)
                 }
                 #endif
                 Button("About These Earbuds") {
@@ -286,6 +291,10 @@ private struct MenuHeader: View {
 
 #Preview("Nothing Ear (open)") {
     MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .nothingEarOpen)]))
+}
+
+#Preview("Fast Pair device") {
+    MenuContentView(devices: DeviceManager(previewSessions: [.preview(model: .fastPair)]))
 }
 
 #Preview("Two devices") {

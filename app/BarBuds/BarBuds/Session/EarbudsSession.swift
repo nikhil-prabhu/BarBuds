@@ -15,7 +15,9 @@ final class EarbudsSession: Identifiable {
 
     let id: String
     let name: String
-    let capabilities: DeviceCapabilities
+    /// What the model supports. Usually fixed, but the generic Fast Pair
+    /// driver learns some from the device, so it's read again after each read.
+    private(set) var capabilities: DeviceCapabilities
     private(set) var connection: Connection = .disconnected
     /// Last state the device confirmed.
     private(set) var state: DeviceState
@@ -28,6 +30,9 @@ final class EarbudsSession: Identifiable {
     /// A balance being dragged that the device hasn't confirmed yet.
     private var balanceDraft: Int32?
 
+    /// Set when the control channel is the Fast Pair message stream, so
+    /// ringing goes over it instead of a second channel.
+    @ObservationIgnored private let sharedChannel: SharedChannel?
     @ObservationIgnored private let controller: BarBudsController
     @ObservationIgnored private let makeTransport: @Sendable () -> any EarbudsTransport
     @ObservationIgnored private var transport: (any EarbudsTransport)?
@@ -42,12 +47,22 @@ final class EarbudsSession: Identifiable {
         id = device.id
         name = device.name
         controller = BarBudsController(model: device.model)
-        capabilities = controller.capabilities()
+        let capabilities = controller.capabilities()
+        self.capabilities = capabilities
         state = controller.state()
         makeTransport = device.makeTransport
-        if capabilities.canRing, let makeFindTransport = device.makeFindTransport {
+        // The generic Fast Pair driver's control channel is the one ringing
+        // uses, and an RFCOMM channel can't be opened twice.
+        let controlChannelIsFastPair = rfcommServiceUuid(model: device.model) == fastPairServiceUuid()
+        if capabilities.canRing, controlChannelIsFastPair {
+            let channel = SharedChannel()
+            sharedChannel = channel
+            find = FindSession(makeTransport: { SharedChannelTransport(channel: channel) })
+        } else if capabilities.canRing, let makeFindTransport = device.makeFindTransport {
+            sharedChannel = nil
             find = FindSession(makeTransport: makeFindTransport)
         } else {
+            sharedChannel = nil
             find = nil
         }
     }
@@ -72,6 +87,7 @@ final class EarbudsSession: Identifiable {
         }
         self.transport = transport
         connection = .connected
+        sharedChannel?.write = { data in try await transport.write(data) }
 
         readTask = Task { [weak self] in
             for await chunk in transport.incoming {
@@ -102,6 +118,7 @@ final class EarbudsSession: Identifiable {
         balanceWriteTask?.cancel()
         balanceWriteTask = nil
         transport = nil
+        sharedChannel?.closed()
         eqDraft = nil
         balanceDraft = nil
         controller.reset()
@@ -184,14 +201,17 @@ final class EarbudsSession: Identifiable {
     /// Applies bytes read from the device. Returns any frames the protocol
     /// wants written in response.
     private func receive(_ chunk: Data) -> Data {
+        sharedChannel?.deliver(chunk)
         let previousEq = state.eq
         let previousBalance = state.balance
         do {
             state = try controller.feed(bytes: chunk)
+            refreshCapabilities()
         } catch {
             // Valid frames in the chunk were still applied.
             Self.log.error("Discarded bad frame: \(error.localizedDescription, privacy: .public)")
             state = controller.state()
+            refreshCapabilities()
         }
         // The device confirmed an EQ change and no newer edit is waiting to be sent.
         if eqWriteTask == nil, state.eq != previousEq {
@@ -203,6 +223,14 @@ final class EarbudsSession: Identifiable {
             balanceDraft = nil
         }
         return controller.takeOutbound()
+    }
+
+    /// Publishes capabilities only when they changed, so views don't redraw for nothing.
+    private func refreshCapabilities() {
+        let latest = controller.capabilities()
+        if latest != capabilities {
+            capabilities = latest
+        }
     }
 
     private func send(_ encode: () throws -> Data) async {
@@ -249,6 +277,7 @@ extension EarbudsSession {
             outbound = session.controller.takeOutbound()
         }
         session.state = session.controller.state()
+        session.refreshCapabilities()
         if let info {
             session.state.info = info
         }

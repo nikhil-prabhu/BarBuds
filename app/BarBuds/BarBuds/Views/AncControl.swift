@@ -6,6 +6,8 @@ struct AncControl: View {
     /// `nil` until the device reports its mode, and while it can't apply one
     /// (e.g. Pixel Buds report no mode while they're in the case).
     let selected: AncMode?
+    /// Whether the mode can be changed from BarBuds right now.
+    var availability: AncAvailability = .available
     let onSelect: (AncMode) -> Void
 
     var body: some View {
@@ -16,19 +18,36 @@ struct AncControl: View {
                     modeButton(mode)
                 }
             }
-            .disabled(selected == nil)
-            if selected == nil {
-                Text("Available while wearing your earbuds")
+            if let hint {
+                Text(hint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var hint: String? {
+        switch availability {
+        case .onDeviceOnly:
+            "These earbuds only let you change this on the earbuds themselves."
+        case .notNow:
+            "Available while wearing your earbuds"
+        case .available:
+            selected == nil ? "Available while wearing your earbuds" : nil
+        }
+    }
+
+    /// The mode can't be changed from BarBuds right now.
+    private var isLocked: Bool {
+        selected == nil || availability != .available
     }
 
     @ViewBuilder
     private func modeButton(_ mode: AncMode) -> some View {
         let isSelected = mode == selected
         let button = Button {
+            guard !isLocked else { return }
             onSelect(mode)
         } label: {
             VStack(spacing: 4) {
@@ -45,10 +64,18 @@ struct AncControl: View {
         .accessibilityLabel(mode.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-        if isSelected {
+        if isSelected, isLocked {
+            // Keep the active mode's colour, dimmed, so it stays obvious
+            // which mode is on (disabling it would turn it grey).
+            button.buttonStyle(.glassProminent)
+                .opacity(0.5)
+                .allowsHitTesting(false)
+                .accessibilityAddTraits(.isStaticText)
+        } else if isSelected {
             button.buttonStyle(.glassProminent)
         } else {
             button.buttonStyle(.glass)
+                .disabled(isLocked)
         }
     }
 }
@@ -90,6 +117,17 @@ struct SectionTitle: View {
     AncControl(
         modes: [.off, .noiseCancelling, .transparency],
         selected: nil,
+        onSelect: { _ in }
+    )
+    .padding()
+    .frame(width: 300)
+}
+
+#Preview("On the earbuds only") {
+    AncControl(
+        modes: [.off, .noiseCancelling, .transparency],
+        selected: .noiseCancelling,
+        availability: .onDeviceOnly,
         onSelect: { _ in }
     )
     .padding()

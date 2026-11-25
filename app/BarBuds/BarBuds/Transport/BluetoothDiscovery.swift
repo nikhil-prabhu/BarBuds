@@ -10,6 +10,13 @@ import os
 /// advertise (`rfcommServiceUuid(model:)` from the core), so a renamed pair
 /// is still found.
 nonisolated struct BluetoothDiscovery: DeviceDiscovery {
+    #if DEBUG
+    /// Debug menu option: use the generic Fast Pair driver for every device
+    /// that offers Fast Pair, e.g. to test it with Pixel Buds. Read when a
+    /// device is found, so it applies after relaunching.
+    static let preferFastPairKey = "debugPreferFastPairDriver"
+    #endif
+
     func events() -> AsyncStream<DiscoveryEvent> {
         let (stream, continuation) = AsyncStream.makeStream(of: DiscoveryEvent.self)
         Task { @MainActor in
@@ -97,7 +104,15 @@ private final class BluetoothMonitor: NSObject {
     /// The first supported model whose control service the device advertises.
     /// Uses macOS's cached SDP records, which exist for any paired device.
     private static func supportedModel(of device: IOBluetoothDevice) -> (DeviceModel, String)? {
-        for model in supportedModels() {
+        var models = supportedModels()
+        #if DEBUG
+        // Debug menu: try the generic Fast Pair driver before the specific ones.
+        if UserDefaults.standard.bool(forKey: BluetoothDiscovery.preferFastPairKey) {
+            models.removeAll { $0 == .fastPair }
+            models.insert(.fastPair, at: 0)
+        }
+        #endif
+        for model in models {
             guard let uuid = rfcommServiceUuid(model: model),
                   let sdpUUID = RFCOMMTransport.sdpUUID(uuid),
                   device.getServiceRecord(for: sdpUUID) != nil

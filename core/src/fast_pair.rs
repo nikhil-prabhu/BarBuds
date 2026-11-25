@@ -25,9 +25,9 @@ use crate::error::BarBudsError;
 /// RFCOMM service UUID of the Fast Pair message stream.
 pub const FAST_PAIR_SERVICE_UUID: &str = "df21fe2c-2515-4fdb-8886-f12c4d67927c";
 
-const HEADER_LEN: usize = 4;
+pub(crate) const HEADER_LEN: usize = 4;
 /// Message stream payloads are small; anything larger means lost sync.
-const MAX_DATA: usize = 1024;
+pub(crate) const MAX_DATA: usize = 1024;
 
 mod group {
     pub const DEVICE_ACTION: u8 = 0x04;
@@ -69,7 +69,7 @@ impl RingState {
     }
 }
 
-fn encode(group: u8, code: u8, data: &[u8]) -> Vec<u8> {
+pub(crate) fn encode(group: u8, code: u8, data: &[u8]) -> Vec<u8> {
     let len = u16::try_from(data.len()).expect("message stream data is small");
     let mut message = Vec::with_capacity(HEADER_LEN + data.len());
     message.extend_from_slice(&[group, code]);
@@ -80,7 +80,7 @@ fn encode(group: u8, code: u8, data: &[u8]) -> Vec<u8> {
 
 /// Split one message off the front of `buf`: `(consumed, group, code, data)`.
 /// `None` means more bytes are needed.
-fn decode(buf: &[u8]) -> Option<(usize, u8, u8, &[u8])> {
+pub(crate) fn decode(buf: &[u8]) -> Option<(usize, u8, u8, &[u8])> {
     if buf.len() < HEADER_LEN {
         return None;
     }

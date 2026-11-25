@@ -15,8 +15,11 @@ BarBuds lives in the menu bar and automatically lists every supported pair of ea
 | Google Pixel Buds Pro (1st gen) | ✓ | Off, Noise Cancelling, Transparency | 5-band (±6 dB) with presets | Conversation Detection, Volume EQ, Multipoint, In-Ear Detection, Touch Controls, Mono Audio, press & hold action and its noise-control cycle |
 | Google Pixel Buds A-Series | ✓ | – | Bass level (−1 to +4) | Adaptive Sound, Volume EQ, In-Ear Detection |
 | Nothing Ear (open) *(partial)* | ✓ | – | 3-band Custom (±6 dB) with presets | Multipoint (Dual Connection), Low Latency Mode, gesture controls |
+| Other earbuds and headphones with Google Fast Pair *(generic)* | ✓ (one level for headphones), if the device reports it | Shown; usually changeable only on the device | – | – |
 
 *Partial* support means the basics are confirmed on real hardware but some of the vendor app's features are missing.
+
+*Generic* support covers earbuds and headphones that BarBuds has no specific driver for but that support Google Fast Pair (the Android quick-pairing popup), using only what the Fast Pair standard defines. Not every device reports its battery level. Fast Pair only lets a device's paired phone change noise control, so most devices refuse changes from a Mac; BarBuds then shows the current mode without letting you change it.
 
 Settings changed elsewhere, such as from your phone or with a gesture on the earbuds, update in BarBuds as the earbuds report them. Pixel Buds Pro only report a noise-control mode while they're being worn, so noise control is unavailable while they're in the case (when in-ear detection is turned on).
 
@@ -78,7 +81,7 @@ Please leave device identifiers, such as serial numbers, out of any frames you c
 
 - **[pbpctrl](https://github.com/qzed/pbpctrl)** by Maximilian Luz: a Linux tool for controlling Pixel Buds Pro. BarBuds' Pixel Buds Pro support is built on pbpctrl's reverse-engineering of the Maestro protocol (RPC channels, message definitions and setting IDs), and its HDLC test vectors are part of BarBuds' tests. pbpctrl is licensed under MIT / Apache-2.0.
 - **[EarA-linux](https://github.com/oneydef/EarA-linux)** (GPL-3.0) and **[Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge)** (AGPL-3.0): their documentation of Nothing's earbud protocol is the basis for BarBuds' Nothing Ear (open) support. BarBuds uses the protocol facts only, not their code, plus two test frames from their test suites.
-- **[BudsLink](https://github.com/maniacx/BudsLink)** (GPL-3.0): a Linux app for many earbuds whose Nothing command table gave BarBuds the Ear (open)'s EQ preset codes, Dual Connection commands and gesture controls. Again, protocol facts only, not code.
+- **[BudsLink](https://github.com/maniacx/BudsLink)** (GPL-3.0): a Linux app for many earbuds whose Nothing command table gave BarBuds the Ear (open)'s EQ preset codes, Dual Connection commands and gesture controls, and whose generic Fast Pair driver showed the noise-control message layout. Generic support otherwise follows Google's [Fast Pair specification](https://developers.google.com/nearby/fast-pair/specifications/introduction). Again, protocol facts only, not code.
 - The Pixel Buds A-Series protocol was reverse-engineered for BarBuds from Bluetooth captures of the official app.
 - The logo is the 🍻 "clinking beer mugs" emoji from Google's [Noto Emoji](https://github.com/googlefonts/noto-emoji), licensed under Apache-2.0.
 

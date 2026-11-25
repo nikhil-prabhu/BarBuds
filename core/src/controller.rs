@@ -6,8 +6,8 @@ use crate::driver::{EarbudDriver, Event};
 use crate::drivers::driver_for;
 use crate::error::BarBudsError;
 use crate::model::{
-    ANC_CYCLE_MIN_MODES, AncMode, BALANCE_MAX, BALANCE_MIN, ControlSetting, DeviceCapabilities,
-    DeviceModel, DeviceState, EqSettings, FeatureToggle,
+    ANC_CYCLE_MIN_MODES, AncAvailability, AncMode, BALANCE_MAX, BALANCE_MIN, ControlSetting,
+    DeviceCapabilities, DeviceModel, DeviceState, EqSettings, FeatureToggle,
 };
 
 /// Drop buffered bytes past this size; a well-behaved device never gets close.
@@ -26,7 +26,6 @@ const MAX_RX_BUFFER: usize = 4096;
 #[derive(uniffi::Object)]
 pub struct BarBudsController {
     model: DeviceModel,
-    capabilities: DeviceCapabilities,
     inner: Mutex<Inner>,
 }
 
@@ -60,6 +59,11 @@ fn apply(state: &mut DeviceState, event: Event) {
         Event::Balance(balance) => state.balance = Some(balance),
         Event::SerialNumbers(serials) => state.info.serial_numbers = serials,
         Event::AncCycle(modes) => state.anc_cycle = Some(modes),
+        Event::AncState(mode, availability) => {
+            state.anc = mode;
+            state.anc_availability = availability;
+        }
+        Event::AncAvailability(availability) => state.anc_availability = availability,
         Event::Controls(settings) => {
             for setting in settings {
                 let slot =
@@ -87,11 +91,9 @@ impl BarBudsController {
 impl BarBudsController {
     #[uniffi::constructor]
     pub fn new(model: DeviceModel) -> Arc<Self> {
-        let inner = Inner::new(model);
         Arc::new(Self {
             model,
-            capabilities: inner.driver.capabilities(),
-            inner: Mutex::new(inner),
+            inner: Mutex::new(Inner::new(model)),
         })
     }
 
@@ -99,8 +101,11 @@ impl BarBudsController {
         self.model
     }
 
+    /// What the model supports. Usually fixed, but a driver that learns
+    /// them from the device (e.g. the generic Fast Pair driver's noise-control
+    /// modes) may change them as frames arrive, so read them again after `feed()`.
     pub fn capabilities(&self) -> DeviceCapabilities {
-        self.capabilities.clone()
+        self.inner().driver.capabilities()
     }
 
     pub fn state(&self) -> DeviceState {
@@ -166,18 +171,27 @@ impl BarBudsController {
     }
 
     pub fn encode_anc(&self, mode: AncMode) -> Result<Vec<u8>, BarBudsError> {
-        if !self.capabilities.anc_modes.contains(&mode) {
+        if !self.capabilities().anc_modes.contains(&mode) {
             return Err(BarBudsError::Unsupported {
                 feature: format!("ANC mode {mode:?}"),
             });
         }
-        self.inner().driver.encode_anc(mode)
+        let mut inner = self.inner();
+        match inner.state.anc_availability {
+            AncAvailability::Available => inner.driver.encode_anc(mode),
+            AncAvailability::NotNow => Err(BarBudsError::device(
+                "noise control can't be changed right now",
+            )),
+            AncAvailability::OnDeviceOnly => Err(BarBudsError::device(
+                "these earbuds only change noise control on the earbuds themselves",
+            )),
+        }
     }
 
     pub fn encode_eq(&self, eq: EqSettings) -> Result<Vec<u8>, BarBudsError> {
         // A preset must be one the model lists; a custom curve needs bands.
         let supported = self
-            .capabilities
+            .capabilities()
             .eq
             .as_ref()
             .is_some_and(|caps| match &eq.preset {
@@ -198,7 +212,7 @@ impl BarBudsController {
     /// Frame setting the left/right balance (see [`DeviceState::balance`]).
     /// The state changes once the device confirms it through `feed()`.
     pub fn encode_balance(&self, balance: i32) -> Result<Vec<u8>, BarBudsError> {
-        if !self.capabilities.has_balance {
+        if !self.capabilities().has_balance {
             return Err(BarBudsError::Unsupported {
                 feature: "balance".to_string(),
             });
@@ -214,7 +228,7 @@ impl BarBudsController {
     /// Frame turning an on/off feature on or off. The state changes once the
     /// device confirms it through `feed()`.
     pub fn encode_toggle(&self, toggle: FeatureToggle, on: bool) -> Result<Vec<u8>, BarBudsError> {
-        if !self.capabilities.toggles.contains(&toggle) {
+        if !self.capabilities().toggles.contains(&toggle) {
             return Err(BarBudsError::Unsupported {
                 feature: format!("{toggle:?}"),
             });
@@ -225,13 +239,17 @@ impl BarBudsController {
     /// Frame changing one gesture's action. The state changes once the
     /// device confirms it through `feed()`.
     pub fn encode_control(&self, setting: ControlSetting) -> Result<Vec<u8>, BarBudsError> {
-        let allowed = self.capabilities.controls.as_ref().is_some_and(|controls| {
-            controls.slots.iter().any(|slot| {
-                slot.side == setting.side
-                    && slot.gesture == setting.gesture
-                    && slot.actions.contains(&setting.action)
-            })
-        });
+        let allowed = self
+            .capabilities()
+            .controls
+            .as_ref()
+            .is_some_and(|controls| {
+                controls.slots.iter().any(|slot| {
+                    slot.side == setting.side
+                        && slot.gesture == setting.gesture
+                        && slot.actions.contains(&setting.action)
+                })
+            });
         if !allowed {
             return Err(BarBudsError::Unsupported {
                 feature: format!(
@@ -247,7 +265,7 @@ impl BarBudsController {
     /// cycles through (at least [`ANC_CYCLE_MIN_MODES`]). The state changes
     /// once the device confirms it through `feed()`.
     pub fn encode_anc_cycle(&self, modes: Vec<AncMode>) -> Result<Vec<u8>, BarBudsError> {
-        let offered = &self.capabilities.anc_cycle_modes;
+        let offered = &self.capabilities().anc_cycle_modes;
         if offered.is_empty() {
             return Err(BarBudsError::Unsupported {
                 feature: "the noise-control cycle".to_string(),
