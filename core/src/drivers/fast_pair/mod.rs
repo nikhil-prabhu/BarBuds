@@ -250,6 +250,7 @@ impl EarbudDriver for FastPairDriver {
             can_ring: true,
             has_balance: false,
             anc_cycle_modes: vec![],
+            spatial_audio_modes: vec![],
             controls: None,
         }
     }

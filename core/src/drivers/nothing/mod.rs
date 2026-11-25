@@ -30,8 +30,8 @@
 //! <https://github.com/oneydef/EarA-linux>) for the framing, battery, EQ and
 //! the Custom EQ encoding; BudsLink (GPL-3.0,
 //! <https://github.com/maniacx/BudsLink>) for preset codes, noise control,
-//! in-ear detection, Dual Connection, gestures, model IDs and each model's
-//! features. Facts only, no code.
+//! in-ear detection, Dual Connection, Spatial Audio, gestures, model IDs and
+//! each model's features. Facts only, no code.
 //!
 //! Confirmed on Ear (open) hardware (a tester, 2026-11): framing and request
 //! CRCs, battery, firmware, EQ presets, the Custom EQ curve, Low Latency and
@@ -47,6 +47,7 @@ use crate::model::{
     AncMode, BatteryReading, BatteryStatus, BudSide, ComponentStrings, ControlAction,
     ControlCapabilities, ControlGesture, ControlInput, ControlSetting, ControlSlot,
     DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle, FormFactor,
+    SpatialAudioMode,
 };
 use models::NothingModel;
 
@@ -110,6 +111,11 @@ mod command {
     /// Dual Connection changed (direction `0xE0`; shares its code with the
     /// device-info reply, direction `0x40`).
     pub const DUAL_NOTIFY: u8 = 0x06;
+    /// Spatial audio: `[mode, variant]`, see [`super::SPATIAL_MODES`]. Some
+    /// CMF earbuds reply with one byte (0 off, 1 fixed, 2 head tracking).
+    pub const SPATIAL_GET: u8 = 0x4F;
+    /// Spatial audio: set `[mode, variant]`.
+    pub const SPATIAL_SET: u8 = 0x52;
     /// The Custom EQ curve; see [`super::custom_eq_payload`].
     pub const CUSTOM_EQ_SET: u8 = 0x41;
     pub const CUSTOM_EQ_GET: u8 = 0x44;
@@ -117,6 +123,33 @@ mod command {
     pub const GESTURES_GET: u8 = 0x18;
     /// Changes gestures; same layout as the reply (BudsLink sends one).
     pub const GESTURES_SET: u8 = 0x03;
+}
+
+/// Spatial audio wire values, `[mode, variant]` (swift-nothing-ear's).
+const SPATIAL_MODES: [(SpatialAudioMode, [u8; 2]); 5] = [
+    (SpatialAudioMode::Off, [0x00, 0x00]),
+    (SpatialAudioMode::Fixed, [0x01, 0x00]),
+    (SpatialAudioMode::HeadTracking, [0x01, 0x01]),
+    (SpatialAudioMode::Concert, [0x02, 0x00]),
+    (SpatialAudioMode::Cinema, [0x03, 0x00]),
+];
+
+/// The spatial audio mode in a reply.
+fn spatial_mode(payload: &[u8]) -> Option<SpatialAudioMode> {
+    match *payload {
+        // One byte, as some CMF earbuds report it.
+        [single] => match single {
+            0x00 => Some(SpatialAudioMode::Off),
+            0x01 => Some(SpatialAudioMode::Fixed),
+            0x02 => Some(SpatialAudioMode::HeadTracking),
+            _ => None,
+        },
+        [mode, variant, ..] => SPATIAL_MODES
+            .iter()
+            .find(|&&(_, bytes)| bytes == [mode, variant])
+            .map(|&(m, _)| m),
+        [] => None,
+    }
 }
 
 /// The button on each bud that the gestures belong to.
@@ -453,6 +486,7 @@ impl NothingDriver {
             let reads = [
                 (model.dual_connection, command::DUAL_GET),
                 (model.in_ear_detection, command::IN_EAR_GET),
+                (!model.spatial_audio.is_empty(), command::SPATIAL_GET),
                 (model.anc.is_some(), command::ANC_GET),
                 (model.custom_sliders, command::CUSTOM_EQ_GET),
                 (!model.gestures.is_empty(), command::GESTURES_GET),
@@ -616,6 +650,12 @@ impl NothingDriver {
                     .ok_or_else(|| BarBudsError::malformed("empty dual-connection payload"))?;
                 Ok(Some(Event::Toggle(FeatureToggle::Multipoint, value == 1)))
             }
+            (direction::REPLY, command::SPATIAL_GET) => {
+                let mode = spatial_mode(payload).ok_or_else(|| {
+                    BarBudsError::malformed(format!("unknown spatial audio mode {payload:02x?}"))
+                })?;
+                Ok(Some(Event::SpatialAudio(mode)))
+            }
             (direction::REPLY, command::LATENCY_GET) => {
                 let &value = payload
                     .first()
@@ -653,6 +693,7 @@ impl EarbudDriver for NothingDriver {
                 can_ring: true,
                 has_balance: false,
                 anc_cycle_modes: vec![],
+                spatial_audio_modes: vec![],
                 controls: None,
             };
         };
@@ -714,6 +755,7 @@ impl EarbudDriver for NothingDriver {
             can_ring: true,
             has_balance: false,
             anc_cycle_modes: vec![],
+            spatial_audio_modes: model.spatial_audio.to_vec(),
             controls,
         }
     }
@@ -875,6 +917,14 @@ impl EarbudDriver for NothingDriver {
         };
         let confirms = Event::Eq(self.eq(Some(id.to_string())));
         Ok(self.set(set, &[code, 0x00], confirms))
+    }
+
+    fn encode_spatial_audio(&mut self, mode: SpatialAudioMode) -> Result<Vec<u8>, BarBudsError> {
+        let &(_, bytes) = SPATIAL_MODES
+            .iter()
+            .find(|&&(m, _)| m == mode)
+            .expect("every mode has wire values");
+        Ok(self.set(command::SPATIAL_SET, &bytes, Event::SpatialAudio(mode)))
     }
 
     fn encode_control(&mut self, setting: ControlSetting) -> Result<Vec<u8>, BarBudsError> {
@@ -1679,6 +1729,24 @@ mod tests {
             }
             assert_eq!(eq.band_labels.is_empty(), !model.custom_sliders, "{name}");
 
+            // Every spatial audio mode.
+            assert_eq!(caps.spatial_audio_modes, model.spatial_audio, "{name}");
+            if !model.spatial_audio.is_empty() {
+                assert_eq!(state.spatial_audio, Some(SpatialAudioMode::Off), "{name}");
+            }
+            for &mode in &caps.spatial_audio_modes {
+                exchange(
+                    &controller,
+                    &mut device,
+                    controller.encode_spatial_audio(mode).unwrap(),
+                );
+                assert_eq!(
+                    controller.state().spatial_audio,
+                    Some(mode),
+                    "{name}: {mode:?}"
+                );
+            }
+
             // Every switch, both ways.
             for &toggle in &caps.toggles {
                 for on in [true, false] {
@@ -1898,5 +1966,60 @@ mod tests {
             .feed(reply(direction::REPLY, command::EQ_GET, &[0, 0]))
             .unwrap();
         assert_eq!(controller.take_outbound()[3], command::MODEL_ID);
+    }
+
+    #[test]
+    fn spatial_audio_modes_read_and_write() {
+        // The reply payloads from swift-nothing-ear's tests: CMF Buds Pro 2
+        // in Fixed (one byte), CMF Headphone Pro in Cinema (two bytes). Their
+        // frames leave out the CRC the header announces, so they're framed
+        // here with one.
+        let buds = identified(0xB187);
+        assert_eq!(
+            buds.capabilities().spatial_audio_modes,
+            [SpatialAudioMode::Off, SpatialAudioMode::Fixed]
+        );
+        buds.feed(reply(direction::REPLY, command::SPATIAL_GET, &[0x01]))
+            .unwrap();
+        assert_eq!(buds.state().spatial_audio, Some(SpatialAudioMode::Fixed));
+        let headphones = identified(0xB175);
+        headphones
+            .feed(reply(direction::REPLY, command::SPATIAL_GET, &[0x03, 0x00]))
+            .unwrap();
+        assert_eq!(
+            headphones.state().spatial_audio,
+            Some(SpatialAudioMode::Cinema)
+        );
+
+        // Its write: [mode, variant], e.g. Concert = 02 00.
+        let frame = headphones
+            .encode_spatial_audio(SpatialAudioMode::Concert)
+            .unwrap();
+        assert_eq!(frame[3..5], [command::SPATIAL_SET, direction::SET]);
+        assert_eq!(frame[8..10], [0x02, 0x00]);
+        headphones
+            .feed(reply(direction::ACK, command::SPATIAL_SET, &[]))
+            .unwrap();
+        assert_eq!(
+            headphones.state().spatial_audio,
+            Some(SpatialAudioMode::Concert)
+        );
+
+        // Head tracking only on the Headphone (1): 01 01.
+        let headphone_1 = identified(0xB170);
+        let frame = headphone_1
+            .encode_spatial_audio(SpatialAudioMode::HeadTracking)
+            .unwrap();
+        assert_eq!(frame[8..10], [0x01, 0x01]);
+        assert!(
+            buds.encode_spatial_audio(SpatialAudioMode::HeadTracking)
+                .is_err()
+        );
+        assert!(ear_open().capabilities().spatial_audio_modes.is_empty());
+        // swift-nothing-ear's write for CMF Buds Pro 2 Fixed, whole frame.
+        assert_eq!(
+            encode_frame(HOST_CONTROL, 0xF052, 0x01, &[0x01, 0x00]),
+            hex("55 60 01 52 f0 02 00 01 01 00 44 3d")
+        );
     }
 }

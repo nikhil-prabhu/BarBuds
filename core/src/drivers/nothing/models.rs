@@ -3,14 +3,16 @@
 //! (GPL-3.0, <https://github.com/maniacx/BudsLink>; facts only, no code),
 //! limited to what BarBuds models: battery, noise control (Off, Transparency
 //! and Noise Cancelling, whose strengths are kept as the buds report them),
-//! EQ presets, in-ear detection, Dual Connection, Low Latency and gestures on
+//! EQ presets, in-ear detection, Dual Connection, Low Latency, spatial audio
+//! modes (from swift-nothing-ear, GPL-3.0,
+//! <https://github.com/bestK1ngArthur/swift-nothing-ear>; facts only) and gestures on
 //! the buds themselves (not headphone dials, sliders or case knobs).
 //!
 //! Only the Ear (open) is confirmed on hardware; the rest are expected to
 //! work but untested. BudsLink's tables are known to be incomplete: they don't
 //! list Dual Connection for the Ear (open), which it has.
 
-use crate::model::{BudSide, ControlAction, ControlGesture, FormFactor};
+use crate::model::{BudSide, ControlAction, ControlGesture, FormFactor, SpatialAudioMode};
 
 /// One model's features.
 #[derive(Debug)]
@@ -33,6 +35,8 @@ pub(crate) struct NothingModel {
     pub custom_sliders: bool,
     pub in_ear_detection: bool,
     pub dual_connection: bool,
+    /// Spatial audio modes, Off first; empty without spatial audio.
+    pub spatial_audio: &'static [SpatialAudioMode],
     pub gestures: &'static [Slot],
     /// Confirmed on real hardware.
     pub tested: bool,
@@ -58,6 +62,21 @@ pub(crate) struct Slot {
     pub gesture: ControlGesture,
     pub actions: &'static [ControlAction],
 }
+
+/// Spatial audio on earbuds: on (fixed) or off.
+const SPATIAL_FIXED: &[SpatialAudioMode] = &[SpatialAudioMode::Off, SpatialAudioMode::Fixed];
+/// The Headphone (1) also tracks the listener's head.
+const SPATIAL_HEAD_TRACKING: &[SpatialAudioMode] = &[
+    SpatialAudioMode::Off,
+    SpatialAudioMode::Fixed,
+    SpatialAudioMode::HeadTracking,
+];
+/// The Headphone (a) and CMF Headphone Pro have listening presets instead.
+const SPATIAL_PRESETS: &[SpatialAudioMode] = &[
+    SpatialAudioMode::Off,
+    SpatialAudioMode::Concert,
+    SpatialAudioMode::Cinema,
+];
 
 /// Noise Cancelling strengths: high, mid, low, adaptive.
 const ALL_STRENGTHS: AncCodes = AncCodes {
@@ -233,6 +252,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: false,
+        spatial_audio: &[],
         dual_connection: false,
         gestures: EAR_1_GESTURES,
         tested: false,
@@ -248,6 +268,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: &[],
         dual_connection: true,
         gestures: EAR_2_GESTURES,
         tested: false,
@@ -265,6 +286,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: &[],
         dual_connection: false,
         gestures: NOTHING_GESTURES,
         tested: false,
@@ -280,6 +302,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: &[],
         dual_connection: true,
         gestures: NOTHING_GESTURES,
         tested: false,
@@ -295,6 +318,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: &[],
         dual_connection: true,
         gestures: NOTHING_GESTURES,
         tested: false,
@@ -310,6 +334,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: SPATIAL_FIXED,
         dual_connection: true,
         gestures: EAR_3_GESTURES,
         tested: false,
@@ -325,6 +350,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: SPATIAL_FIXED,
         dual_connection: true,
         gestures: EAR_3_GESTURES,
         tested: false,
@@ -341,6 +367,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: true,
         in_ear_detection: false,
+        spatial_audio: &[],
         dual_connection: true,
         gestures: EAR_OPEN_GESTURES,
         tested: true,
@@ -356,6 +383,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: SPATIAL_HEAD_TRACKING,
         dual_connection: true,
         gestures: &[],
         tested: false,
@@ -371,6 +399,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: false,
+        spatial_audio: SPATIAL_PRESETS,
         dual_connection: true,
         gestures: &[],
         tested: false,
@@ -390,6 +419,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: &[],
         dual_connection: false,
         gestures: CMF_PRO_GESTURES,
         tested: false,
@@ -405,6 +435,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: true,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: SPATIAL_FIXED,
         dual_connection: true,
         gestures: CMF_GESTURES,
         tested: false,
@@ -420,6 +451,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: true,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: &[],
         dual_connection: true,
         gestures: CMF_GESTURES,
         tested: false,
@@ -435,6 +467,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: true,
         custom_sliders: false,
         in_ear_detection: false,
+        spatial_audio: SPATIAL_FIXED,
         dual_connection: true,
         gestures: CMF_GESTURES,
         tested: false,
@@ -450,6 +483,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: true,
         custom_sliders: false,
         in_ear_detection: false,
+        spatial_audio: &[],
         dual_connection: true,
         gestures: CMF_GESTURES,
         tested: false,
@@ -465,6 +499,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: true,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: SPATIAL_FIXED,
         dual_connection: true,
         gestures: CMF_GESTURES,
         tested: false,
@@ -480,6 +515,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: true,
         custom_sliders: false,
         in_ear_detection: false,
+        spatial_audio: SPATIAL_FIXED,
         dual_connection: true,
         gestures: CMF_GESTURES,
         tested: false,
@@ -495,6 +531,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: true,
+        spatial_audio: SPATIAL_PRESETS,
         dual_connection: true,
         gestures: &[],
         tested: false,
@@ -510,6 +547,7 @@ pub(crate) const MODELS: &[NothingModel] = &[
         listening_mode: false,
         custom_sliders: false,
         in_ear_detection: false,
+        spatial_audio: SPATIAL_FIXED,
         dual_connection: true,
         gestures: &[],
         tested: false,

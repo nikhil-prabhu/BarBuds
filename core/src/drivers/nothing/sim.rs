@@ -15,7 +15,7 @@ use super::models::{self, NothingModel};
 use super::{
     CONTROL_HAS_CRC, CRC_LEN, CUSTOM_CODE, HEADER_LEN, HOST_CONTROL, MAX_PAYLOAD, SOF, command,
     component, custom_eq_gains, custom_eq_payload, direction, encode_frame, gesture_entry,
-    gesture_settings,
+    gesture_settings, spatial_mode,
 };
 use crate::model::{BudSide, ControlAction, ControlGesture, ControlSetting};
 use crate::simulator::Simulator;
@@ -35,6 +35,8 @@ pub(crate) struct NothingSim {
     low_latency: bool,
     dual_connection: bool,
     in_ear_detection: bool,
+    /// Spatial audio as `[mode, variant]`.
+    spatial_audio: [u8; 2],
     gestures: Vec<ControlSetting>,
 }
 
@@ -82,6 +84,7 @@ impl NothingSim {
             low_latency: false,
             dual_connection: true,
             in_ear_detection: true,
+            spatial_audio: [0, 0],
             gestures: model
                 .gestures
                 .iter()
@@ -156,6 +159,18 @@ impl NothingSim {
                 reply(&[1, 1, u8::from(self.in_ear_detection)])
             }
             (direction::GET, command::ANC_GET) if model.anc.is_some() => reply(&[1, self.anc, 0]),
+            (direction::GET, command::SPATIAL_GET) if !model.spatial_audio.is_empty() => {
+                reply(&self.spatial_audio)
+            }
+            (direction::SET, command::SPATIAL_SET) if !model.spatial_audio.is_empty() => {
+                match spatial_mode(payload) {
+                    Some(mode) if payload.len() == 2 && model.spatial_audio.contains(&mode) => {
+                        self.spatial_audio = [payload[0], payload[1]];
+                        ack()
+                    }
+                    _ => Vec::new(),
+                }
+            }
             (direction::GET, command::CUSTOM_EQ_GET) if model.custom_sliders => {
                 reply(&custom_eq_payload(self.custom))
             }

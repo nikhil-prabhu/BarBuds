@@ -113,6 +113,21 @@ mod tests {
     }
 
     #[test]
+    fn every_spatial_audio_mode_round_trips() {
+        for model in supported_models() {
+            let (controller, sim) = connected(model);
+            for mode in controller.capabilities().spatial_audio_modes {
+                exchange(
+                    &controller,
+                    &sim,
+                    controller.encode_spatial_audio(mode).unwrap(),
+                );
+                assert_eq!(controller.state().spatial_audio, Some(mode), "{model:?}");
+            }
+        }
+    }
+
+    #[test]
     fn every_nothing_model_can_be_simulated() {
         let models = crate::nothing_models();
         assert_eq!(models.len(), 19);

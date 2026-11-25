@@ -29,6 +29,20 @@ pub struct NothingModelInfo {
     pub tested: bool,
 }
 
+/// How stereo audio is placed around the listener. (The UI owns the titles.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum SpatialAudioMode {
+    Off,
+    /// Sound stays placed around the listener's head.
+    Fixed,
+    /// Sound stays put in the room as the listener turns their head.
+    HeadTracking,
+    /// Tuned for live music.
+    Concert,
+    /// Tuned for films.
+    Cinema,
+}
+
 /// Whether BarBuds can change the noise-control mode right now.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum AncAvailability {
@@ -149,6 +163,9 @@ pub struct DeviceCapabilities {
     /// cycle through, in display order; empty when the cycle is fixed. See
     /// [`DeviceState::anc_cycle`].
     pub anc_cycle_modes: Vec<AncMode>,
+    /// Spatial audio modes, in display order; empty when there's no spatial
+    /// audio control. See [`DeviceState::spatial_audio`].
+    pub spatial_audio_modes: Vec<SpatialAudioMode>,
 }
 
 /// The fewest modes a noise-control cycle may hold (as the vendor apps require).
@@ -267,6 +284,9 @@ pub struct DeviceState {
     /// The modes a noise-control gesture cycles through, in
     /// [`DeviceCapabilities::anc_cycle_modes`] order, once reported.
     pub anc_cycle: Option<Vec<AncMode>>,
+    /// The spatial audio mode, once reported; one of
+    /// [`DeviceCapabilities::spatial_audio_modes`].
+    pub spatial_audio: Option<SpatialAudioMode>,
 }
 
 /// See [`DeviceState::balance`].

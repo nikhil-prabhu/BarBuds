@@ -100,6 +100,15 @@ private struct DeviceControls: View {
             )
         }
 
+        if !capabilities.spatialAudioModes.isEmpty {
+            Divider()
+            SpatialAudioControl(
+                modes: capabilities.spatialAudioModes,
+                selected: session.state.spatialAudio,
+                onSelect: session.setSpatialAudio
+            )
+        }
+
         if let eqCapabilities = capabilities.eq, let eq = session.eq {
             Divider()
             EqControl(

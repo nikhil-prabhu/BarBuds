@@ -7,7 +7,7 @@ use crate::drivers::driver_for;
 use crate::error::BarBudsError;
 use crate::model::{
     ANC_CYCLE_MIN_MODES, AncAvailability, AncMode, BALANCE_MAX, BALANCE_MIN, ControlSetting,
-    DeviceCapabilities, DeviceModel, DeviceState, EqSettings, FeatureToggle,
+    DeviceCapabilities, DeviceModel, DeviceState, EqSettings, FeatureToggle, SpatialAudioMode,
 };
 
 /// Drop buffered bytes past this size; a well-behaved device never gets close.
@@ -67,6 +67,7 @@ fn apply(state: &mut DeviceState, event: Event) {
             state.anc_availability = availability;
         }
         Event::AncAvailability(availability) => state.anc_availability = availability,
+        Event::SpatialAudio(mode) => state.spatial_audio = Some(mode),
         Event::Controls(settings) => {
             for setting in settings {
                 let slot =
@@ -263,6 +264,17 @@ impl BarBudsController {
             });
         }
         self.inner().driver.encode_control(setting)
+    }
+
+    /// Frame setting the spatial audio mode. The state changes once the
+    /// device confirms it through `feed()`.
+    pub fn encode_spatial_audio(&self, mode: SpatialAudioMode) -> Result<Vec<u8>, BarBudsError> {
+        if !self.capabilities().spatial_audio_modes.contains(&mode) {
+            return Err(BarBudsError::Unsupported {
+                feature: format!("spatial audio {mode:?}"),
+            });
+        }
+        self.inner().driver.encode_spatial_audio(mode)
     }
 
     /// Frame choosing which noise-control modes a noise-control gesture

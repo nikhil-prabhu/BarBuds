@@ -4,7 +4,7 @@
 use crate::error::BarBudsError;
 use crate::model::{
     AncAvailability, AncMode, BatteryStatus, ComponentStrings, ControlSetting, DeviceCapabilities,
-    EqSettings, FeatureToggle,
+    EqSettings, FeatureToggle, SpatialAudioMode,
 };
 
 /// A state change decoded from one inbound frame.
@@ -24,6 +24,7 @@ pub(crate) enum Event {
     /// The noise-control mode and whether BarBuds can change it.
     AncState(Option<AncMode>, AncAvailability),
     AncAvailability(AncAvailability),
+    SpatialAudio(SpatialAudioMode),
     /// The noise-control gesture's modes, in capabilities order.
     AncCycle(Vec<AncMode>),
 }
@@ -92,6 +93,14 @@ pub(crate) trait EarbudDriver: Send {
         let _ = modes;
         Err(BarBudsError::Unsupported {
             feature: "the noise-control cycle".to_string(),
+        })
+    }
+
+    /// Only called with a mode listed in `capabilities().spatial_audio_modes`.
+    fn encode_spatial_audio(&mut self, mode: SpatialAudioMode) -> Result<Vec<u8>, BarBudsError> {
+        let _ = mode;
+        Err(BarBudsError::Unsupported {
+            feature: "spatial audio".to_string(),
         })
     }
 

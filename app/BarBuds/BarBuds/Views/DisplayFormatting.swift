@@ -76,6 +76,38 @@ extension FormFactor {
     }
 }
 
+extension SpatialAudioMode {
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .fixed: "Fixed"
+        case .headTracking: "Head Tracking"
+        case .concert: "Concert"
+        case .cinema: "Cinema"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .off: "Plain stereo"
+        case .fixed: "Sound surrounds you and moves with your head"
+        case .headTracking: "Sound stays in place as you turn your head"
+        case .concert: "Tuned for live music"
+        case .cinema: "Tuned for films"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .off: "circle.slash"
+        case .fixed: "dot.radiowaves.left.and.right"
+        case .headTracking: "rotate.3d"
+        case .concert: "music.mic"
+        case .cinema: "film"
+        }
+    }
+}
+
 extension FeatureToggle {
     /// Worded for the device, e.g. on-head detection for headphones.
     func title(for formFactor: FormFactor) -> String {

@@ -137,6 +137,10 @@ final class EarbudsSession: Identifiable {
 
     // MARK: Settings
 
+    func setSpatialAudio(_ mode: SpatialAudioMode) {
+        Task { await send { try controller.encodeSpatialAudio(mode: mode) } }
+    }
+
     func setAnc(_ mode: AncMode) {
         Task { await send { try controller.encodeAnc(mode: mode) } }
     }
