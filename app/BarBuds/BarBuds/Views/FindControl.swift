@@ -22,15 +22,16 @@ struct FindControl: View {
     private var controls: some View {
         HStack(spacing: 8) {
             if formFactor.isSingleUnit {
-                // One piece: Fast Pair rings it with the bit used for the
-                // right bud, so either bud's ringing counts.
+                // One piece: ring "both". A JBL Tune 770NC acknowledged a
+                // left-only ring without sounding, and only rang for both.
                 budButton(
                     formFactor.deviceTitle,
                     systemImage: formFactor.pairSymbol,
                     isRinging: find.isRinging,
                     accessibilityName: formFactor.deviceNoun
                 ) {
-                    ring(left: false, right: !find.isRinging)
+                    let ringing = !find.isRinging
+                    ring(left: ringing, right: ringing)
                 }
             } else {
                 budButton(

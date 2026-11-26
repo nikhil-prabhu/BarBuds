@@ -9,7 +9,8 @@
 //!   devices skip the battery (a JBL Tune 770NC sent none in 15 minutes).
 //! - **Battery** (`03 03`): one byte per component, left, right, case, or a
 //!   single byte for one-battery devices such as headphones. Bit 7 means
-//!   charging; `0x7F` means unknown.
+//!   charging; `0x7F` means unknown. Until a three-part report arrives, the
+//!   device is shown as headphones (one piece).
 //! - **Firmware** (`03 09`): a version string.
 //! - **Noise control** (hearable control, group `0x08`): get `11`, set `12`,
 //!   notify `13`. A notification carries `[version, supported, settable,
@@ -234,7 +235,11 @@ impl FastPairDriver {
 
 impl EarbudDriver for FastPairDriver {
     fn capabilities(&self) -> DeviceCapabilities {
-        let headphones = self.battery_components == Some(1);
+        // Earbuds send a left/right/case battery report on connect (Pixel Buds
+        // Pro do); a device that sends one level, or none at all (a JBL Tune
+        // 770NC sent none), is treated as one piece. The Bluetooth device
+        // class can't tell them apart: both report "Headset".
+        let headphones = self.battery_components != Some(3);
         DeviceCapabilities {
             display_name: "Generic Fast Pair".to_string(),
             anc_modes: self.anc.map(AncInfo::supported_modes).unwrap_or_default(),
@@ -517,5 +522,18 @@ mod tests {
             Some(AncMode::Off)
         );
         assert!(find.feed(chunk).unwrap().left);
+    }
+
+    #[test]
+    fn a_device_without_earbud_batteries_is_one_piece() {
+        // A JBL Tune 770NC sent nothing on connect, not even its battery.
+        let controller = BarBudsController::new(DeviceModel::FastPair);
+        controller.start();
+        let caps = controller.capabilities();
+        assert_eq!(caps.form_factor, FormFactor::Headphones);
+        assert!(!caps.has_charging_case);
+        // A left/right/case report makes it earbuds.
+        controller.feed(hex("03 03 00 03 50 50 7f")).unwrap();
+        assert_eq!(controller.capabilities().form_factor, FormFactor::Stemmed);
     }
 }
