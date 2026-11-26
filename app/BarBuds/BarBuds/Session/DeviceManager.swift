@@ -57,6 +57,12 @@ extension DeviceManager {
         simulateConnect(model, displayName: displayName) { DeviceSimulator(model: model) }
     }
 
+    /// Simulates `model` under another product's factory name, for drivers
+    /// that recognise a model by name (e.g. Pixel Buds Pro 2).
+    func simulateConnect(_ model: DeviceModel, named displayName: String) {
+        simulateConnect(model, displayName: displayName) { DeviceSimulator(model: model) }
+    }
+
     /// Simulates one Nothing or CMF model (see `nothingModels()`). Its name
     /// ends with the model's, so the driver recognises it as it would real
     /// earbuds with their factory name.

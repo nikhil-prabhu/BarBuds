@@ -7,6 +7,7 @@ extension AncMode {
         case .off: "Off"
         case .noiseCancelling: "Noise Cancelling"
         case .transparency: "Transparency"
+        case .adaptive: "Adaptive"
         }
     }
 
@@ -16,6 +17,7 @@ extension AncMode {
         case .off: "Off"
         case .noiseCancelling: "ANC"
         case .transparency: "Ambient"
+        case .adaptive: "Adaptive"
         }
     }
 
@@ -24,6 +26,7 @@ extension AncMode {
         case .off: "circle.slash"
         case .noiseCancelling: "waveform.slash"
         case .transparency: "ear"
+        case .adaptive: "wand.and.sparkles"
         }
     }
 }

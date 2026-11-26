@@ -64,6 +64,15 @@ fn battery(level: i32, charging: bool) -> Option<proto::DeviceBatteryInfo> {
 }
 
 impl PixelBudsSim {
+    /// Pixel Buds Pro 2: Adaptive in the noise-control cycle (as pbpctrl's
+    /// `adaptive-anc` reads it) and as the current mode.
+    #[cfg(test)]
+    pub fn with_adaptive(mut self) -> Self {
+        self.anc_loop.adaptive = true;
+        self.anc = anc_state::ADAPTIVE;
+        self
+    }
+
     /// Earbuds that serve Maestro on `channel` only.
     pub fn new(channel: u32) -> Self {
         Self {

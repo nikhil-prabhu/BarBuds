@@ -121,6 +121,8 @@ pub(crate) mod anc_state {
     pub const OFF: i32 = 1;
     pub const ACTIVE: i32 = 2;
     pub const AWARE: i32 = 3;
+    /// Adaptive noise cancelling (Pixel Buds Pro 2; pbpctrl's `adaptive-anc`).
+    pub const ADAPTIVE: i32 = 4;
 }
 
 /// `ReadSettingMsg`.

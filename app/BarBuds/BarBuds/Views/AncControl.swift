@@ -125,6 +125,16 @@ struct SectionTitle: View {
     .frame(width: 300)
 }
 
+#Preview("With Adaptive") {
+    AncControl(
+        modes: [.off, .noiseCancelling, .transparency, .adaptive],
+        selected: .adaptive,
+        onSelect: { _ in }
+    )
+    .padding()
+    .frame(width: 300)
+}
+
 #Preview("On the earbuds only") {
     AncControl(
         modes: [.off, .noiseCancelling, .transparency],

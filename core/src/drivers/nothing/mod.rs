@@ -860,6 +860,12 @@ impl EarbudDriver for NothingDriver {
             AncMode::Transparency => anc.transparency.ok_or_else(|| BarBudsError::Unsupported {
                 feature: "transparency".to_string(),
             })?,
+            // Nothing's Adaptive is a Noise Cancelling strength, not a mode.
+            AncMode::Adaptive => {
+                return Err(BarBudsError::Unsupported {
+                    feature: "the Adaptive noise-control mode".to_string(),
+                });
+            }
             // The strength the buds last used, else the model's default.
             AncMode::NoiseCancelling => self
                 .cancelling_code

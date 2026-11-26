@@ -60,19 +60,20 @@ pub(crate) mod code {
     pub const NAK: u8 = 0x02;
 }
 
-/// Noise-control mode bits (BudsLink's). Adaptive (0x40) has no `AncMode`
-/// yet, so it's never offered and shows as no mode.
+/// Noise-control mode bits (BudsLink's, matching Google's spec).
 pub(crate) mod anc_bit {
     pub const NOISE_CANCELLING: u8 = 0x08;
     pub const OFF: u8 = 0x20;
+    pub const ADAPTIVE: u8 = 0x40;
     pub const TRANSPARENCY: u8 = 0x80;
 }
 
 /// The modes BarBuds can show, in the popover's order, with their bits.
-const MODES: [(AncMode, u8); 3] = [
+const MODES: [(AncMode, u8); 4] = [
     (AncMode::Off, anc_bit::OFF),
     (AncMode::NoiseCancelling, anc_bit::NOISE_CANCELLING),
     (AncMode::Transparency, anc_bit::TRANSPARENCY),
+    (AncMode::Adaptive, anc_bit::ADAPTIVE),
 ];
 
 const UNKNOWN_LEVEL: u8 = 0x7F;
@@ -117,7 +118,7 @@ impl AncInfo {
         self.supported & self.settable & bit != 0
     }
 
-    /// The current mode, `None` if it's one BarBuds can't show (Adaptive).
+    /// The current mode, `None` if it's one BarBuds can't show.
     fn current_mode(self) -> Option<AncMode> {
         MODES
             .iter()
@@ -409,11 +410,26 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_shows_no_mode() {
+    fn adaptive_is_a_mode() {
+        // Supported 0xe8: Transparency, Adaptive, Off, Noise Cancelling.
         let controller = BarBudsController::new(DeviceModel::FastPair);
         controller.feed(hex("08 13 00 04 01 e8 e8 40")).unwrap();
-        assert_eq!(controller.state().anc, None);
+        assert_eq!(controller.state().anc, Some(AncMode::Adaptive));
+        assert!(
+            controller
+                .capabilities()
+                .anc_modes
+                .contains(&AncMode::Adaptive)
+        );
+        assert_eq!(
+            controller.encode_anc(AncMode::Adaptive).unwrap(),
+            hex("08 12 00 04 01 e8 e8 40")
+        );
         assert!(controller.feed(hex("ff 01 00 02 08 12")).is_ok());
+        // Not offered by devices that don't list it.
+        let older = BarBudsController::new(DeviceModel::FastPair);
+        older.feed(hex("08 13 00 04 01 a8 a8 08")).unwrap();
+        assert!(!older.capabilities().anc_modes.contains(&AncMode::Adaptive));
     }
 
     #[test]

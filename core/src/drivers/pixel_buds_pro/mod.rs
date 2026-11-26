@@ -118,25 +118,34 @@ pub(crate) struct PixelBudsProDriver {
     /// Each bud's touch & hold [`action_target`], left and right, once
     /// reported. Writes carry both, so changing one keeps the other.
     hold_targets: Option<(i32, i32)>,
-    /// The noise-control cycle as last reported, so a write keeps flags
-    /// BarBuds doesn't show (Adaptive).
+    /// The noise-control cycle as last reported, so a write keeps the
+    /// Adaptive flag on buds without Adaptive.
     anc_loop: Option<proto::AncrGestureLoop>,
+    /// The Bluetooth name is the Pixel Buds Pro 2's factory name. Kept
+    /// across `start()`.
+    named_pro_2: bool,
+    /// The buds reported Adaptive (as the mode or in the noise-control
+    /// cycle), so they have it whatever their name.
+    adaptive_seen: bool,
 }
 
-/// The modes the noise-control cycle can include, in the popover's order.
-const ANC_CYCLE_MODES: [AncMode; 3] = [
+/// The noise-control modes, in the popover's order; Adaptive only on buds
+/// that have it (see [`PixelBudsProDriver::has_adaptive`]).
+const ANC_MODES: [AncMode; 4] = [
     AncMode::Off,
     AncMode::NoiseCancelling,
     AncMode::Transparency,
+    AncMode::Adaptive,
 ];
 
 fn anc_cycle(anc_loop: &proto::AncrGestureLoop) -> Vec<AncMode> {
-    ANC_CYCLE_MODES
+    ANC_MODES
         .into_iter()
         .filter(|mode| match mode {
             AncMode::Off => anc_loop.off,
             AncMode::NoiseCancelling => anc_loop.active,
             AncMode::Transparency => anc_loop.aware,
+            AncMode::Adaptive => anc_loop.adaptive,
         })
         .collect()
 }
@@ -177,6 +186,19 @@ fn hold_settings((left, right): (i32, i32)) -> Vec<ControlSetting> {
 }
 
 impl PixelBudsProDriver {
+    /// Pixel Buds Pro 2 (and any buds that report Adaptive) have the
+    /// Adaptive mode; the first generation doesn't.
+    fn has_adaptive(&self) -> bool {
+        self.named_pro_2 || self.adaptive_seen
+    }
+
+    fn anc_modes(&self) -> Vec<AncMode> {
+        ANC_MODES
+            .into_iter()
+            .filter(|&mode| mode != AncMode::Adaptive || self.has_adaptive())
+            .collect()
+    }
+
     fn channel(&self) -> Result<u32, BarBudsError> {
         self.channel
             .ok_or_else(|| BarBudsError::device("still connecting to the earbuds"))
@@ -317,6 +339,9 @@ impl PixelBudsProDriver {
     fn setting_event(&mut self, rsp: proto::SettingsRsp) -> Result<Option<Event>, BarBudsError> {
         match rsp.value.and_then(|v| v.value) {
             Some(Setting::CurrentAncrState(state)) => {
+                if state == anc_state::ADAPTIVE {
+                    self.adaptive_seen = true;
+                }
                 anc_mode(state).map(|mode| Some(Event::Anc(mode)))
             }
             Some(Setting::CurrentUserEq(bands)) => {
@@ -328,6 +353,9 @@ impl PixelBudsProDriver {
             }
             Some(Setting::AncrGestureLoop(anc_loop)) => {
                 self.anc_loop = Some(anc_loop);
+                if anc_loop.adaptive {
+                    self.adaptive_seen = true;
+                }
                 Ok(Some(Event::AncCycle(anc_cycle(&anc_loop))))
             }
             Some(Setting::GestureControl(control)) => {
@@ -398,6 +426,7 @@ fn anc_mode(state: i32) -> Result<Option<AncMode>, BarBudsError> {
         anc_state::OFF => Ok(Some(AncMode::Off)),
         anc_state::ACTIVE => Ok(Some(AncMode::NoiseCancelling)),
         anc_state::AWARE => Ok(Some(AncMode::Transparency)),
+        anc_state::ADAPTIVE => Ok(Some(AncMode::Adaptive)),
         other => Err(BarBudsError::malformed(format!(
             "unsupported ANC state {other}"
         ))),
@@ -409,18 +438,20 @@ fn anc_state(mode: AncMode) -> i32 {
         AncMode::Off => anc_state::OFF,
         AncMode::NoiseCancelling => anc_state::ACTIVE,
         AncMode::Transparency => anc_state::AWARE,
+        AncMode::Adaptive => anc_state::ADAPTIVE,
     }
 }
 
 impl EarbudDriver for PixelBudsProDriver {
     fn capabilities(&self) -> DeviceCapabilities {
         DeviceCapabilities {
-            display_name: "Pixel Buds Pro".to_string(),
-            anc_modes: vec![
-                AncMode::Off,
-                AncMode::NoiseCancelling,
-                AncMode::Transparency,
-            ],
+            display_name: if self.named_pro_2 {
+                "Pixel Buds Pro 2"
+            } else {
+                "Pixel Buds Pro"
+            }
+            .to_string(),
+            anc_modes: self.anc_modes(),
             eq: Some(EqCapabilities {
                 band_labels: BAND_LABELS.map(String::from).to_vec(),
                 unit: EqUnit::Decibels,
@@ -442,7 +473,7 @@ impl EarbudDriver for PixelBudsProDriver {
             toggles: TOGGLES.iter().map(|&(toggle, _)| toggle).collect(),
             can_ring: true,
             has_balance: true,
-            anc_cycle_modes: ANC_CYCLE_MODES.to_vec(),
+            anc_cycle_modes: self.anc_modes(),
             spatial_audio_modes: vec![],
             controls: Some(ControlCapabilities {
                 // The Pixel Buds app says "Press & hold".
@@ -459,8 +490,15 @@ impl EarbudDriver for PixelBudsProDriver {
         }
     }
 
+    fn set_device_name(&mut self, name: &str) {
+        self.named_pro_2 = name.trim().to_lowercase().ends_with("pixel buds pro 2");
+    }
+
     fn start(&mut self) -> Vec<u8> {
-        *self = Self::default();
+        *self = Self {
+            named_pro_2: self.named_pro_2,
+            ..Self::default()
+        };
         rpc::CANDIDATE_CHANNELS
             .into_iter()
             .flat_map(|channel| {
@@ -521,7 +559,12 @@ impl EarbudDriver for PixelBudsProDriver {
     }
 
     fn encode_anc_cycle(&mut self, modes: &[AncMode]) -> Result<Vec<u8>, BarBudsError> {
-        let adaptive = self.anc_loop.is_some_and(|l| l.adaptive);
+        // Buds without Adaptive get their own flag back unchanged.
+        let adaptive = if self.has_adaptive() {
+            modes.contains(&AncMode::Adaptive)
+        } else {
+            self.anc_loop.is_some_and(|l| l.adaptive)
+        };
         let anc_loop = proto::AncrGestureLoop {
             active: modes.contains(&AncMode::NoiseCancelling),
             off: modes.contains(&AncMode::Off),
@@ -1036,7 +1079,7 @@ mod tests {
     #[test]
     fn unsupported_anc_state_is_an_error_but_state_survives() {
         let (controller, mut sim) = connected();
-        let err = controller.feed(sim.external_anc_change(4)).unwrap_err(); // "adaptive"
+        let err = controller.feed(sim.external_anc_change(5)).unwrap_err(); // no such state
         assert!(matches!(err, BarBudsError::MalformedFrame { .. }));
         assert_eq!(controller.state().anc, Some(AncMode::NoiseCancelling));
     }
@@ -1047,5 +1090,71 @@ mod tests {
         controller.reset();
         assert_eq!(controller.state(), DeviceState::default());
         assert!(controller.encode_anc(AncMode::Off).is_err());
+    }
+
+    #[test]
+    fn the_first_generation_has_no_adaptive() {
+        let (controller, _) = connected();
+        let caps = controller.capabilities();
+        assert_eq!(caps.display_name, "Pixel Buds Pro");
+        assert!(!caps.anc_modes.contains(&AncMode::Adaptive));
+        assert!(!caps.anc_cycle_modes.contains(&AncMode::Adaptive));
+        assert!(controller.encode_anc(AncMode::Adaptive).is_err());
+    }
+
+    #[test]
+    fn pixel_buds_pro_2_by_name_have_adaptive() {
+        let controller = BarBudsController::new(DeviceModel::PixelBudsPro);
+        controller.set_device_name("Pixel Buds Pro 2".to_string());
+        let mut sim = PixelBudsSim::new(24);
+        exchange(&controller, &mut sim, controller.start());
+        let caps = controller.capabilities();
+        assert_eq!(caps.display_name, "Pixel Buds Pro 2");
+        assert_eq!(
+            caps.anc_modes,
+            [
+                AncMode::Off,
+                AncMode::NoiseCancelling,
+                AncMode::Transparency,
+                AncMode::Adaptive
+            ]
+        );
+        // Adaptive is Maestro state 4.
+        exchange(
+            &controller,
+            &mut sim,
+            controller.encode_anc(AncMode::Adaptive).unwrap(),
+        );
+        assert_eq!(controller.state().anc, Some(AncMode::Adaptive));
+        assert_eq!(sim.anc(), anc_state::ADAPTIVE);
+        // And it can join the press & hold cycle.
+        let cycle = vec![AncMode::NoiseCancelling, AncMode::Adaptive];
+        exchange(
+            &controller,
+            &mut sim,
+            controller.encode_anc_cycle(cycle.clone()).unwrap(),
+        );
+        assert_eq!(controller.state().anc_cycle, Some(cycle));
+    }
+
+    #[test]
+    fn renamed_buds_that_report_adaptive_get_it() {
+        // A renamed Pro 2: Adaptive shows up from what the buds report.
+        let controller = BarBudsController::new(DeviceModel::PixelBudsPro);
+        controller.set_device_name("Nikhil's buds".to_string());
+        let mut sim = PixelBudsSim::new(24).with_adaptive();
+        exchange(&controller, &mut sim, controller.start());
+        assert_eq!(controller.state().anc, Some(AncMode::Adaptive));
+        let caps = controller.capabilities();
+        assert_eq!(caps.display_name, "Pixel Buds Pro");
+        assert!(caps.anc_modes.contains(&AncMode::Adaptive));
+        assert!(caps.anc_cycle_modes.contains(&AncMode::Adaptive));
+        assert!(
+            controller
+                .state()
+                .anc_cycle
+                .unwrap()
+                .contains(&AncMode::Adaptive)
+        );
     }
 }

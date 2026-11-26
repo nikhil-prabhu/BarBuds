@@ -60,6 +60,9 @@ pub enum AncMode {
     Off,
     NoiseCancelling,
     Transparency,
+    /// Noise cancelling that adjusts to the surroundings (e.g. Pixel Buds
+    /// Pro 2's Adaptive). Not a strength of Noise Cancelling: a separate mode.
+    Adaptive,
 }
 
 /// The general shape of a model's earbuds. Generic on purpose: the UI draws a

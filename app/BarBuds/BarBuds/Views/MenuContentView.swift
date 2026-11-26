@@ -211,6 +211,12 @@ private struct MenuHeader: View {
                                 Button(BarBudsController(model: model).capabilities().displayName) {
                                     devices.simulateConnect(model)
                                 }
+                                if model == .pixelBudsPro {
+                                    // Same protocol; recognised by its name.
+                                    Button("Pixel Buds Pro 2 (Untested)") {
+                                        devices.simulateConnect(model, named: "Pixel Buds Pro 2")
+                                    }
+                                }
                             }
                         }
                     }
