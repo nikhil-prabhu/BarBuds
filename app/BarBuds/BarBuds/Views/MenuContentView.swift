@@ -197,8 +197,22 @@ private struct MenuHeader: View {
                 #if DEBUG
                 Section("Debug") {
                     Menu("Simulate Device Connecting") {
+                        // One submenu per vendor; anything else (the generic
+                        // Fast Pair driver) at the top level.
                         ForEach(supportedModels(), id: \.self) { model in
-                            if model == .nothing {
+                            switch model {
+                            case .pixelBudsPro:
+                                Menu("Google Pixel Buds") {
+                                    simulateButton(.pixelBudsPro)
+                                    // Same protocol; recognised by its name.
+                                    Button("Pixel Buds Pro 2 (Untested)") {
+                                        devices.simulateConnect(.pixelBudsPro, named: "Pixel Buds Pro 2")
+                                    }
+                                    simulateButton(.pixelBudsASeries)
+                                }
+                            case .pixelBudsASeries:
+                                EmptyView() // In the Google submenu.
+                            case .nothing:
                                 // One driver, many models: pick which to simulate.
                                 Menu("Nothing and CMF") {
                                     ForEach(nothingModels(), id: \.id) { nothing in
@@ -207,16 +221,8 @@ private struct MenuHeader: View {
                                         }
                                     }
                                 }
-                            } else {
-                                Button(BarBudsController(model: model).capabilities().displayName) {
-                                    devices.simulateConnect(model)
-                                }
-                                if model == .pixelBudsPro {
-                                    // Same protocol; recognised by its name.
-                                    Button("Pixel Buds Pro 2 (Untested)") {
-                                        devices.simulateConnect(model, named: "Pixel Buds Pro 2")
-                                    }
-                                }
+                            default:
+                                simulateButton(model)
                             }
                         }
                     }
@@ -252,6 +258,14 @@ private struct MenuHeader: View {
             .fixedSize()
         }
     }
+
+    #if DEBUG
+    private func simulateButton(_ model: DeviceModel) -> some View {
+        Button(BarBudsController(model: model).capabilities().displayName) {
+            devices.simulateConnect(model)
+        }
+    }
+    #endif
 
     /// The device name, or a switcher when more than one device is connected.
     @ViewBuilder
