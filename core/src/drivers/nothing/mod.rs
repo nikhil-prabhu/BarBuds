@@ -44,7 +44,7 @@ pub(crate) mod sim;
 use crate::driver::{Decoded, EarbudDriver, Event};
 use crate::error::BarBudsError;
 use crate::model::{
-    AncMode, BatteryReading, BatteryStatus, BudSide, ComponentStrings, ControlAction,
+    AncMode, AncStrength, BatteryReading, BatteryStatus, BudSide, ComponentStrings, ControlAction,
     ControlCapabilities, ControlGesture, ControlInput, ControlSetting, ControlSlot,
     DeviceCapabilities, EqCapabilities, EqPreset, EqSettings, EqUnit, FeatureToggle, FormFactor,
     SpatialAudioMode,
@@ -133,6 +133,36 @@ const SPATIAL_MODES: [(SpatialAudioMode, [u8; 2]); 5] = [
     (SpatialAudioMode::Concert, [0x02, 0x00]),
     (SpatialAudioMode::Cinema, [0x03, 0x00]),
 ];
+
+/// Noise Cancelling strength codes (BudsLink's and swift-nothing-ear's), in
+/// the popover's order.
+const STRENGTHS: [(AncStrength, u8); 4] = [
+    (AncStrength::Low, 0x03),
+    (AncStrength::Mid, 0x02),
+    (AncStrength::High, 0x01),
+    (AncStrength::Adaptive, 0x04),
+];
+
+/// The strengths a model offers: only when it has more than one Noise
+/// Cancelling code (a single code is just "on", e.g. CMF Buds).
+fn strengths(anc: &models::AncCodes) -> Vec<AncStrength> {
+    if anc.cancelling.len() < 2 {
+        return vec![];
+    }
+    STRENGTHS
+        .iter()
+        .filter(|(_, code)| anc.cancelling.contains(code))
+        .map(|&(strength, _)| strength)
+        .collect()
+}
+
+fn strength_code(strength: AncStrength) -> u8 {
+    STRENGTHS
+        .iter()
+        .find(|&&(s, _)| s == strength)
+        .map(|&(_, code)| code)
+        .expect("every strength has a code")
+}
 
 /// The spatial audio mode in a reply.
 fn spatial_mode(payload: &[u8]) -> Option<SpatialAudioMode> {
@@ -510,6 +540,13 @@ impl NothingDriver {
                 self.custom_gains = gains;
             }
         }
+        if let Event::NoiseControl {
+            strength: Some(strength),
+            ..
+        } = event
+        {
+            self.cancelling_code = Some(strength_code(strength));
+        }
         Some(event)
     }
 
@@ -624,7 +661,16 @@ impl NothingDriver {
             (direction::REPLY, command::ANC_GET) | (direction::NOTIFY_ALT, command::ANC_NOTIFY) => {
                 let code = anc_code(payload)
                     .ok_or_else(|| BarBudsError::malformed("empty noise-control payload"))?;
-                Ok(Some(Event::Anc(self.anc_mode(code))))
+                let mode = self.anc_mode(code);
+                // The strength, when it's Noise Cancelling on a model with a choice.
+                let strength = self
+                    .model()
+                    .and_then(|m| m.anc)
+                    .filter(|anc| !strengths(anc).is_empty())
+                    .and_then(|_| STRENGTHS.iter().find(|&&(_, c)| c == code))
+                    .map(|&(strength, _)| strength)
+                    .filter(|_| mode == Some(AncMode::NoiseCancelling));
+                Ok(Some(Event::NoiseControl { mode, strength }))
             }
             (direction::REPLY, command::IN_EAR_GET) => {
                 let &value = payload
@@ -694,6 +740,7 @@ impl EarbudDriver for NothingDriver {
                 has_balance: false,
                 anc_cycle_modes: vec![],
                 spatial_audio_modes: vec![],
+                anc_strengths: vec![],
                 controls: None,
             };
         };
@@ -756,6 +803,7 @@ impl EarbudDriver for NothingDriver {
             has_balance: false,
             anc_cycle_modes: vec![],
             spatial_audio_modes: model.spatial_audio.to_vec(),
+            anc_strengths: model.anc.as_ref().map_or(vec![], strengths),
             controls,
         }
     }
@@ -923,6 +971,18 @@ impl EarbudDriver for NothingDriver {
         };
         let confirms = Event::Eq(self.eq(Some(id.to_string())));
         Ok(self.set(set, &[code, 0x00], confirms))
+    }
+
+    fn encode_anc_strength(&mut self, strength: AncStrength) -> Result<Vec<u8>, BarBudsError> {
+        // Setting a strength also turns Noise Cancelling on.
+        Ok(self.set(
+            command::ANC_SET,
+            &[0x01, strength_code(strength), 0x00],
+            Event::NoiseControl {
+                mode: Some(AncMode::NoiseCancelling),
+                strength: Some(strength),
+            },
+        ))
     }
 
     fn encode_spatial_audio(&mut self, mode: SpatialAudioMode) -> Result<Vec<u8>, BarBudsError> {
@@ -1735,6 +1795,20 @@ mod tests {
             }
             assert_eq!(eq.band_labels.is_empty(), !model.custom_sliders, "{name}");
 
+            // Every Noise Cancelling strength, where the model has a choice.
+            let expected = model.anc.as_ref().map_or(vec![], strengths);
+            assert_eq!(caps.anc_strengths, expected, "{name}");
+            for &strength in &caps.anc_strengths {
+                exchange(
+                    &controller,
+                    &mut device,
+                    controller.encode_anc_strength(strength).unwrap(),
+                );
+                let state = controller.state();
+                assert_eq!(state.anc, Some(AncMode::NoiseCancelling), "{name}");
+                assert_eq!(state.anc_strength, Some(strength), "{name}: {strength:?}");
+            }
+
             // Every spatial audio mode.
             assert_eq!(caps.spatial_audio_modes, model.spatial_audio, "{name}");
             if !model.spatial_audio.is_empty() {
@@ -2027,5 +2101,63 @@ mod tests {
             encode_frame(HOST_CONTROL, 0xF052, 0x01, &[0x01, 0x00]),
             hex("55 60 01 52 f0 02 00 01 01 00 44 3d")
         );
+    }
+
+    #[test]
+    fn noise_cancelling_strengths() {
+        // Nothing Ear (a): Low, Mid, High and Adaptive.
+        let controller = identified(0xB183);
+        assert_eq!(
+            controller.capabilities().anc_strengths,
+            [
+                AncStrength::Low,
+                AncStrength::Mid,
+                AncStrength::High,
+                AncStrength::Adaptive
+            ]
+        );
+        // A reported strength comes with the mode.
+        controller
+            .feed(reply(direction::REPLY, command::ANC_GET, &[1, 0x03, 0]))
+            .unwrap();
+        let state = controller.state();
+        assert_eq!(state.anc, Some(AncMode::NoiseCancelling));
+        assert_eq!(state.anc_strength, Some(AncStrength::Low));
+        // Setting one: [1, code, 0], as for a mode.
+        let frame = controller
+            .encode_anc_strength(AncStrength::Adaptive)
+            .unwrap();
+        assert_eq!(frame[3..5], [command::ANC_SET, direction::SET]);
+        assert_eq!(frame[8..11], [0x01, 0x04, 0x00]);
+        controller
+            .feed(reply(direction::ACK, command::ANC_SET, &[]))
+            .unwrap();
+        assert_eq!(controller.state().anc_strength, Some(AncStrength::Adaptive));
+        // Transparency keeps the strength; Noise Cancelling goes back to it.
+        controller
+            .feed(reply(
+                direction::NOTIFY_ALT,
+                command::ANC_NOTIFY,
+                &[1, 0x07, 0],
+            ))
+            .unwrap();
+        assert_eq!(controller.state().anc, Some(AncMode::Transparency));
+        assert_eq!(controller.state().anc_strength, Some(AncStrength::Adaptive));
+        let back = controller.encode_anc(AncMode::NoiseCancelling).unwrap();
+        assert_eq!(back[9], 0x04);
+
+        // The Ear (1) has two; the CMF Buds' single code is no choice.
+        assert_eq!(
+            identified(0xB181).capabilities().anc_strengths,
+            [AncStrength::Low, AncStrength::High]
+        );
+        let cmf_buds = identified(0xB168);
+        assert!(cmf_buds.capabilities().anc_strengths.is_empty());
+        assert!(cmf_buds.encode_anc_strength(AncStrength::High).is_err());
+        cmf_buds
+            .feed(reply(direction::REPLY, command::ANC_GET, &[1, 0x04, 0]))
+            .unwrap();
+        assert_eq!(cmf_buds.state().anc, Some(AncMode::NoiseCancelling));
+        assert_eq!(cmf_buds.state().anc_strength, None);
     }
 }

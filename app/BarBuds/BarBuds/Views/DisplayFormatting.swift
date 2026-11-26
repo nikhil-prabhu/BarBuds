@@ -79,6 +79,17 @@ extension FormFactor {
     }
 }
 
+extension AncStrength {
+    var title: String {
+        switch self {
+        case .low: "Low"
+        case .mid: "Mid"
+        case .high: "High"
+        case .adaptive: "Adaptive"
+        }
+    }
+}
+
 extension SpatialAudioMode {
     var title: String {
         switch self {

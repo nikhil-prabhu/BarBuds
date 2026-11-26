@@ -271,6 +271,7 @@ impl EarbudDriver for PixelBudsASeriesDriver {
             has_balance: false,
             anc_cycle_modes: vec![],
             spatial_audio_modes: vec![],
+            anc_strengths: vec![],
             controls: None,
         }
     }

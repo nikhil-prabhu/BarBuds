@@ -29,6 +29,17 @@ pub struct NothingModelInfo {
     pub tested: bool,
 }
 
+/// How strongly Noise Cancelling works, on models that let you choose
+/// (e.g. most Nothing earbuds). (The UI owns the titles.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum AncStrength {
+    Low,
+    Mid,
+    High,
+    /// Adjusts the strength to the surroundings.
+    Adaptive,
+}
+
 /// How stereo audio is placed around the listener. (The UI owns the titles.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum SpatialAudioMode {
@@ -169,6 +180,9 @@ pub struct DeviceCapabilities {
     /// Spatial audio modes, in display order; empty when there's no spatial
     /// audio control. See [`DeviceState::spatial_audio`].
     pub spatial_audio_modes: Vec<SpatialAudioMode>,
+    /// Noise Cancelling strengths, in display order; empty when the strength
+    /// can't be chosen. See [`DeviceState::anc_strength`].
+    pub anc_strengths: Vec<AncStrength>,
 }
 
 /// The fewest modes a noise-control cycle may hold (as the vendor apps require).
@@ -290,6 +304,9 @@ pub struct DeviceState {
     /// The spatial audio mode, once reported; one of
     /// [`DeviceCapabilities::spatial_audio_modes`].
     pub spatial_audio: Option<SpatialAudioMode>,
+    /// The Noise Cancelling strength, once reported; kept while another
+    /// mode is on, since the buds go back to it.
+    pub anc_strength: Option<AncStrength>,
 }
 
 /// See [`DeviceState::balance`].

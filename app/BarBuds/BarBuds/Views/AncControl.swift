@@ -10,6 +10,10 @@ struct AncControl: View {
     var availability: AncAvailability = .available
     /// "earbuds" or "headphones", for the hints.
     var deviceNoun = "earbuds"
+    /// Noise Cancelling strengths, when the model offers a choice.
+    var strengths: [AncStrength] = []
+    var strength: AncStrength? = nil
+    var onSelectStrength: (AncStrength) -> Void = { _ in }
     let onSelect: (AncMode) -> Void
 
     var body: some View {
@@ -19,6 +23,9 @@ struct AncControl: View {
                 ForEach(modes, id: \.self) { mode in
                     modeButton(mode)
                 }
+            }
+            if selected == .noiseCancelling, !strengths.isEmpty {
+                strengthPicker
             }
             if let hint {
                 Text(hint)
@@ -38,6 +45,26 @@ struct AncControl: View {
         case .available:
             selected == nil ? "Available while wearing your \(deviceNoun)" : nil
         }
+    }
+
+    /// How strongly Noise Cancelling works, like the Nothing X app's slider.
+    private var strengthPicker: some View {
+        Picker("Noise Cancelling Strength", selection: Binding(
+            get: { strength },
+            set: { if let new = $0 { onSelectStrength(new) } }
+        )) {
+            ForEach(strengths, id: \.self) { strength in
+                Text(strength.title).tag(Optional(strength))
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        // Compact and centred under the mode buttons (segmented controls
+        // otherwise fill the width).
+        .frame(width: CGFloat(strengths.count) * 54)
+        .frame(maxWidth: .infinity)
+        .disabled(isLocked)
     }
 
     /// The mode can't be changed from BarBuds right now.
@@ -119,6 +146,18 @@ struct SectionTitle: View {
     AncControl(
         modes: [.off, .noiseCancelling, .transparency],
         selected: nil,
+        onSelect: { _ in }
+    )
+    .padding()
+    .frame(width: 300)
+}
+
+#Preview("Strengths") {
+    AncControl(
+        modes: [.off, .noiseCancelling, .transparency],
+        selected: .noiseCancelling,
+        strengths: [.low, .mid, .high, .adaptive],
+        strength: .high,
         onSelect: { _ in }
     )
     .padding()

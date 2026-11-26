@@ -3,8 +3,8 @@
 
 use crate::error::BarBudsError;
 use crate::model::{
-    AncAvailability, AncMode, BatteryStatus, ComponentStrings, ControlSetting, DeviceCapabilities,
-    EqSettings, FeatureToggle, SpatialAudioMode,
+    AncAvailability, AncMode, AncStrength, BatteryStatus, ComponentStrings, ControlSetting,
+    DeviceCapabilities, EqSettings, FeatureToggle, SpatialAudioMode,
 };
 
 /// A state change decoded from one inbound frame.
@@ -25,6 +25,12 @@ pub(crate) enum Event {
     AncState(Option<AncMode>, AncAvailability),
     AncAvailability(AncAvailability),
     SpatialAudio(SpatialAudioMode),
+    /// A noise-control report carrying the mode and, when it's Noise
+    /// Cancelling on a model with strengths, the strength.
+    NoiseControl {
+        mode: Option<AncMode>,
+        strength: Option<AncStrength>,
+    },
     /// The noise-control gesture's modes, in capabilities order.
     AncCycle(Vec<AncMode>),
 }
@@ -93,6 +99,14 @@ pub(crate) trait EarbudDriver: Send {
         let _ = modes;
         Err(BarBudsError::Unsupported {
             feature: "the noise-control cycle".to_string(),
+        })
+    }
+
+    /// Only called with a strength listed in `capabilities().anc_strengths`.
+    fn encode_anc_strength(&mut self, strength: AncStrength) -> Result<Vec<u8>, BarBudsError> {
+        let _ = strength;
+        Err(BarBudsError::Unsupported {
+            feature: "noise-cancelling strength".to_string(),
         })
     }
 

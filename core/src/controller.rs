@@ -6,8 +6,9 @@ use crate::driver::{EarbudDriver, Event};
 use crate::drivers::driver_for;
 use crate::error::BarBudsError;
 use crate::model::{
-    ANC_CYCLE_MIN_MODES, AncAvailability, AncMode, BALANCE_MAX, BALANCE_MIN, ControlSetting,
-    DeviceCapabilities, DeviceModel, DeviceState, EqSettings, FeatureToggle, SpatialAudioMode,
+    ANC_CYCLE_MIN_MODES, AncAvailability, AncMode, AncStrength, BALANCE_MAX, BALANCE_MIN,
+    ControlSetting, DeviceCapabilities, DeviceModel, DeviceState, EqSettings, FeatureToggle,
+    SpatialAudioMode,
 };
 
 /// Drop buffered bytes past this size; a well-behaved device never gets close.
@@ -68,6 +69,12 @@ fn apply(state: &mut DeviceState, event: Event) {
         }
         Event::AncAvailability(availability) => state.anc_availability = availability,
         Event::SpatialAudio(mode) => state.spatial_audio = Some(mode),
+        Event::NoiseControl { mode, strength } => {
+            state.anc = mode;
+            if strength.is_some() {
+                state.anc_strength = strength;
+            }
+        }
         Event::Controls(settings) => {
             for setting in settings {
                 let slot =
@@ -264,6 +271,17 @@ impl BarBudsController {
             });
         }
         self.inner().driver.encode_control(setting)
+    }
+
+    /// Frame setting the Noise Cancelling strength (which also turns Noise
+    /// Cancelling on). The state changes once the device confirms it.
+    pub fn encode_anc_strength(&self, strength: AncStrength) -> Result<Vec<u8>, BarBudsError> {
+        if !self.capabilities().anc_strengths.contains(&strength) {
+            return Err(BarBudsError::Unsupported {
+                feature: format!("noise-cancelling strength {strength:?}"),
+            });
+        }
+        self.inner().driver.encode_anc_strength(strength)
     }
 
     /// Frame setting the spatial audio mode. The state changes once the

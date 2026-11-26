@@ -475,6 +475,7 @@ impl EarbudDriver for PixelBudsProDriver {
             has_balance: true,
             anc_cycle_modes: self.anc_modes(),
             spatial_audio_modes: vec![],
+            anc_strengths: vec![],
             controls: Some(ControlCapabilities {
                 // The Pixel Buds app says "Press & hold".
                 input: ControlInput::Press,

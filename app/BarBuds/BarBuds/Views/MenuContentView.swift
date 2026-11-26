@@ -96,6 +96,9 @@ private struct DeviceControls: View {
                 selected: session.state.anc,
                 availability: session.state.ancAvailability,
                 deviceNoun: capabilities.formFactor.deviceNoun,
+                strengths: capabilities.ancStrengths,
+                strength: session.state.ancStrength,
+                onSelectStrength: session.setAncStrength,
                 onSelect: session.setAnc
             )
         }
